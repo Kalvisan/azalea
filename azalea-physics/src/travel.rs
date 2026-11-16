@@ -217,7 +217,7 @@ fn travel_in_fluid(ctx: &mut MoveCtx) {
             new_velocity.y = 0.2;
         }
         new_velocity.x *= water_movement_speed as f64;
-        new_velocity.y *= 0.8;
+        new_velocity.y *= 0.8f32 as f64;
         new_velocity.z *= water_movement_speed as f64;
         ctx.physics.velocity =
             get_fluid_falling_adjusted_movement(gravity, moving_down, new_velocity, ctx.sprinting);
@@ -227,7 +227,7 @@ fn travel_in_fluid(ctx: &mut MoveCtx) {
 
         if ctx.physics.lava_fluid_height <= fluid_jump_threshold() {
             ctx.physics.velocity.x *= 0.5;
-            ctx.physics.velocity.y *= 0.8;
+            ctx.physics.velocity.y *= 0.8f32 as f64;
             ctx.physics.velocity.z *= 0.5;
             let new_velocity = get_fluid_falling_adjusted_movement(
                 gravity,
@@ -254,10 +254,10 @@ fn travel_in_fluid(ctx: &mut MoveCtx) {
             ctx.collidable_entity_query,
             ctx.physics,
             ctx.physics.bounding_box,
-            velocity.up(0.6).down(ctx.position.y).up(y),
+            velocity.up(0.6f32 as f64).down(ctx.position.y).up(y),
         )
     {
-        ctx.physics.velocity.y = 0.3;
+        ctx.physics.velocity.y = 0.3f32 as f64;
     }
 }
 
