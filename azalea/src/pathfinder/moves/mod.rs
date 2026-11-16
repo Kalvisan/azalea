@@ -259,6 +259,15 @@ pub fn default_is_reached(
     false
 }
 
+/// [`default_is_reached`] for a move to a neighbouring block on the same
+/// level, which also counts the node reached while the player is in the air one
+/// block over it, as a sprint-jump carries it.
+pub fn traverse_is_reached(ctx: IsReachedCtx) -> bool {
+    let airborne_over =
+        !ctx.physics.on_ground() && player_pos_to_block_pos(ctx.position).down(1) == ctx.target;
+    airborne_over || default_is_reached(ctx)
+}
+
 pub struct MovesCtx<'a> {
     pub edges: &'a mut Vec<Edge>,
     pub world: &'a CachedWorld,
