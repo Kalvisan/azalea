@@ -6,7 +6,7 @@ use azalea_core::{
 use azalea_entity::{
     Attributes, HasClientLoaded, Jumping, LocalEntity, LookDirection, OnClimbable, Physics,
     PlayerAbilities, Pose, Position,
-    metadata::{FallFlying, Sprinting},
+    metadata::{FallFlying, Sprinting, Swimming},
     move_relative, view_vector,
 };
 use azalea_world::{World, WorldName, Worlds};
@@ -36,6 +36,7 @@ pub fn travel(
             &Jumping,
             Option<&ClientMovementState>,
             Option<&Sprinting>,
+            Option<&Swimming>,
             Option<&Pose>,
             Option<&PlayerAbilities>,
             &mut Physics,
@@ -57,6 +58,7 @@ pub fn travel(
         jumping,
         physics_state,
         sprinting,
+        swimming,
         pose,
         abilities,
         mut physics,
@@ -71,6 +73,12 @@ pub fn travel(
         let world = world_lock.read();
 
         let sprinting = *sprinting.unwrap_or(&Sprinting(false));
+
+        // Player.travel: a swimming player moves up or down towards where it
+        // looks; TODO: passengers never do
+        if swimming.is_some_and(|swimming| **swimming) {
+            swim_towards_look(&mut physics, &world, *position, *direction, **jumping);
+        }
 
         let mut ctx = MoveCtx {
             mover_type: MoverType::Own,
@@ -103,6 +111,28 @@ pub fn travel(
         } else {
             travel_in_air(&mut ctx);
         }
+    }
+}
+
+/// The vertical part of `Player.travel` while swimming: looking down, jumping
+/// or with water above the head, the vertical speed moves towards the look's
+/// vertical part, faster when looking steeply down.
+fn swim_towards_look(
+    physics: &mut Physics,
+    world: &World,
+    position: Position,
+    look: LookDirection,
+    jumping: bool,
+) {
+    let look_y = view_vector(look).y;
+    let multiplier = if look_y < -0.2 { 0.085 } else { 0.06 };
+    let head = BlockPos::from(Vec3::new(position.x, position.y + 1.0 - 0.1, position.z));
+    let water_above = world
+        .chunks
+        .get_block_state(head)
+        .is_some_and(|state| !FluidState::from(state).is_empty());
+    if look_y <= 0.0 || jumping || water_above {
+        physics.velocity.y += (look_y - physics.velocity.y) * multiplier;
     }
 }
 
