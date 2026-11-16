@@ -1,38 +1,65 @@
+use std::sync::LazyLock;
+
 use azalea_block::{
     BlockState,
     fluid_state::{FluidKind, FluidState},
 };
 use azalea_core::{
     direction::Direction,
-    position::{BlockPos, Vec3},
+    position::{BlockPos, ChunkPos, Vec3},
 };
-use azalea_entity::{HasClientLoaded, LocalEntity, Physics, Position};
+use azalea_entity::{
+    HasClientLoaded, LocalEntity, Physics, Position, dimensions::EntityDimensions,
+};
 use azalea_registry::builtin::BlockKind;
 use azalea_world::{World, WorldName, Worlds};
 use bevy_ecs::prelude::*;
 
-use crate::collision::legacy_blocks_motion;
+use crate::collision::{BlockWithShape, Shapes, VoxelShape, box_shape, legacy_blocks_motion};
 
+/// Updates which fluids the entity touches, how deep it is in them, whether its
+/// eyes are in water, and pushes it with their currents, like vanilla's
+/// `Entity.updateFluidInteraction` (with `EntityFluidInteraction.update`).
 #[allow(clippy::type_complexity)]
 pub fn update_in_water_state_and_do_fluid_pushing(
     mut query: Query<
-        (&mut Physics, &Position, &WorldName),
+        (&mut Physics, &Position, &EntityDimensions, &WorldName),
         (With<LocalEntity>, With<HasClientLoaded>),
     >,
     worlds: Res<Worlds>,
 ) {
-    for (mut physics, position, world_name) in &mut query {
+    for (mut physics, position, dimensions, world_name) in &mut query {
         let Some(world_lock) = worlds.get(world_name) else {
             continue;
         };
         let world = world_lock.read();
 
-        // reset the heights since they're going to be set in
-        // update_in_water_state_and_do_water_current_pushing
-        physics.water_fluid_height = 0.;
-        physics.lava_fluid_height = 0.;
+        // Player.updateIsUnderwater and Entity.baseTick read the eye state
+        // from the previous update
+        physics.was_eye_in_water = physics.eye_in_water;
 
-        update_in_water_state_and_do_water_current_pushing(&mut physics, &world, *position);
+        let eye = Vec3::new(
+            position.x,
+            position.y + dimensions.eye_height as f64,
+            position.z,
+        );
+        let interaction = FluidInteraction::update(&physics, &world, eye);
+
+        physics.water_fluid_height = interaction.water.height;
+        physics.lava_fluid_height = interaction.lava.height;
+        physics.eye_in_water = interaction.eye_in_water;
+
+        // TODO: implement vehicles and boats
+        let in_water = interaction.water.height > 0.;
+        if in_water {
+            // if !was_touching_water && !first_tick {
+            //     do_water_splash_effect();
+            // }
+
+            physics.reset_fall_distance();
+            physics.clear_fire();
+        }
+        physics.was_touching_water = in_water;
 
         // right now doing registries.dimension_type() clones the entire
         // registry which is very inefficient, so for now we're doing
@@ -51,129 +78,152 @@ pub fn update_in_water_state_and_do_fluid_pushing(
             0.0023333333333333335
         };
 
-        update_fluid_height_and_do_fluid_pushing(
-            &mut physics,
-            &world,
-            FluidKind::Lava,
-            lava_push_factor,
-        );
-    }
-}
-fn update_in_water_state_and_do_water_current_pushing(
-    physics: &mut Physics,
-    world: &World,
-    _position: Position,
-) {
-    // TODO: implement vehicles and boats
-    // if vehicle == AbstractBoat {
-    //     if !boat.is_underwater() {
-    //         *was_touching_water = false;
-    //     }
-    // }
-
-    // updateFluidHeightAndDoFluidPushing
-    if update_fluid_height_and_do_fluid_pushing(physics, world, FluidKind::Water, 0.014) {
-        // if !was_touching_water && !first_tick {
-        //     do_water_splash_effect();
-        // }
-
-        physics.reset_fall_distance();
-        physics.was_touching_water = true;
-        physics.clear_fire();
-    } else {
-        physics.was_touching_water = false;
+        if in_water {
+            interaction.water.apply_to(&mut physics, 0.014);
+        }
+        if interaction.lava.height > 0. {
+            interaction.lava.apply_to(&mut physics, lava_push_factor);
+        }
     }
 }
 
-fn update_fluid_height_and_do_fluid_pushing(
-    physics: &mut Physics,
-    world: &World,
-    checking_fluid: FluidKind,
-    fluid_push_factor: f64,
-) -> bool {
-    // if touching_unloaded_chunk() {
-    //     return false;
-    // }
+/// What one fluid kind does to the entity this tick: how far it reaches above
+/// the entity's feet, and the summed flow of the touched blocks.
+#[derive(Default)]
+struct FluidContact {
+    height: f64,
+    current_height: f64,
+    current: Vec3,
+    current_count: u32,
+}
 
-    let checking_liquids_aabb = physics.bounding_box.deflate_all(0.001);
+impl FluidContact {
+    /// `EntityFluidInteraction.CurrentAccumulator.applyTo` for a player.
+    fn apply_to(&self, physics: &mut Physics, scale: f64) {
+        if self.current_count == 0 || self.current.length_squared() < 1.0e-5f32 as f64 {
+            return;
+        }
+        let mut impulse = self.current * (1. / self.current_count as f64) * scale;
+        const MIN_PUSH: f64 = 0.003;
+        const MIN_PUSH_LENGTH: f64 = 0.0045000000000000005;
+        if physics.velocity.x.abs() < MIN_PUSH
+            && physics.velocity.z.abs() < MIN_PUSH
+            && impulse.length() < MIN_PUSH_LENGTH
+        {
+            impulse = impulse.normalize() * MIN_PUSH_LENGTH;
+        }
+        physics.velocity += impulse;
+    }
+}
 
-    let min_x = checking_liquids_aabb.min.x.floor() as i32;
-    let min_y = checking_liquids_aabb.min.y.floor() as i32;
-    let min_z = checking_liquids_aabb.min.z.floor() as i32;
+/// The fluids around the entity this tick, as `EntityFluidInteraction`
+/// collects them.
+#[derive(Default)]
+struct FluidInteraction {
+    water: FluidContact,
+    lava: FluidContact,
+    eye_in_water: bool,
+}
 
-    let max_x = checking_liquids_aabb.max.x.ceil() as i32;
-    let max_y = checking_liquids_aabb.max.y.ceil() as i32;
-    let max_z = checking_liquids_aabb.max.z.ceil() as i32;
+impl FluidInteraction {
+    fn update(physics: &Physics, world: &World, eye: Vec3) -> Self {
+        let mut interaction = Self::default();
+        // Entity.getFluidInteractionBox
+        let bounding_box = physics.bounding_box.deflate_all(0.001);
+        let feet_y = physics.bounding_box.min.y;
 
-    let mut min_height_touching = 0.;
-    let is_entity_pushable_by_fluid = true;
-    let mut touching_fluid = false;
-    let mut additional_player_delta = Vec3::ZERO;
-    let mut num_fluids_being_touched = 0;
+        let min_x = bounding_box.min.x.floor() as i32;
+        let min_y = bounding_box.min.y.floor() as i32;
+        let min_z = bounding_box.min.z.floor() as i32;
+        let max_x = bounding_box.max.x.ceil() as i32;
+        let max_y = bounding_box.max.y.ceil() as i32;
+        let max_z = bounding_box.max.z.ceil() as i32;
 
-    for cur_x in min_x..max_x {
-        for cur_y in min_y..max_y {
-            for cur_z in min_z..max_z {
-                let cur_pos = BlockPos::new(cur_x, cur_y, cur_z);
-                let Some(fluid_at_cur_pos) = world.get_fluid_state(cur_pos) else {
-                    continue;
-                };
-                if fluid_at_cur_pos.kind != checking_fluid {
-                    continue;
+        let eye_block_x = eye.x.floor() as i32;
+        let eye_block_z = eye.z.floor() as i32;
+
+        for x in min_x..max_x {
+            for y in min_y..max_y {
+                for z in min_z..max_z {
+                    let pos = BlockPos::new(x, y, z);
+                    let Some(fluid) = world.get_fluid_state(pos) else {
+                        // EntityFluidInteraction.hasFluidAndLoaded: an
+                        // unloaded chunk means no fluid at all, while a
+                        // block outside the world's height is just empty
+                        if world.chunks.get(&ChunkPos::from(pos)).is_none() {
+                            return Self::default();
+                        }
+                        continue;
+                    };
+                    if fluid.is_empty() {
+                        continue;
+                    }
+                    let fluid_bottom = y as f64;
+                    let fluid_top = fluid_bottom + fluid_height(&fluid, world, pos) as f64;
+                    if fluid_top < bounding_box.min.y {
+                        continue;
+                    }
+                    if fluid.kind == FluidKind::Water
+                        && x == eye_block_x
+                        && z == eye_block_z
+                        && eye.y >= fluid_bottom
+                        && eye.y
+                            <= fluid_bottom + fluid_height_for_camera(&fluid, world, pos) as f64
+                    {
+                        interaction.eye_in_water = true;
+                    }
+                    let contact = match fluid.kind {
+                        FluidKind::Water => &mut interaction.water,
+                        FluidKind::Lava => &mut interaction.lava,
+                        FluidKind::Empty => continue,
+                    };
+                    contact.height = f64::max(fluid_top - feet_y, contact.height);
+                    let mut flow = get_fluid_flow(&fluid, world, pos);
+                    contact.current_height = f64::max(contact.height, contact.current_height);
+                    if contact.current_height < 0.4 {
+                        flow *= contact.current_height;
+                    }
+                    contact.current += flow;
+                    contact.current_count += 1;
                 }
-                let fluid_max_y = (cur_y as f32 + fluid_at_cur_pos.height()) as f64;
-                if fluid_max_y < checking_liquids_aabb.min.y {
-                    continue;
-                }
-                touching_fluid = true;
-                min_height_touching = f64::max(
-                    fluid_max_y - checking_liquids_aabb.min.y,
-                    min_height_touching,
-                );
-                if !is_entity_pushable_by_fluid {
-                    continue;
-                }
-                let mut additional_player_delta_for_fluid =
-                    get_fluid_flow(&fluid_at_cur_pos, world, cur_pos);
-                if min_height_touching < 0.4 {
-                    additional_player_delta_for_fluid *= min_height_touching;
-                };
-
-                additional_player_delta += additional_player_delta_for_fluid;
-                num_fluids_being_touched += 1;
             }
         }
+        interaction
     }
+}
 
-    if additional_player_delta.length() > 0. {
-        additional_player_delta /= num_fluids_being_touched as f64;
+/// `FluidState.getHeight`: a full block when the same fluid is above,
+/// otherwise the fluid's own height.
+pub fn fluid_height(fluid: &FluidState, world: &World, pos: BlockPos) -> f32 {
+    let above = world.get_fluid_state(pos.up(1)).unwrap_or_default();
+    if !fluid.is_empty() && above.kind == fluid.kind {
+        1.
+    } else {
+        fluid.height()
+    }
+}
 
-        // if entity_kind != EntityKind::Player {
-        //     additional_player_delta = additional_player_delta.normalize();
-        // }
-
-        let player_delta = physics.velocity;
-        additional_player_delta *= fluid_push_factor;
-        const MIN_PUSH: f64 = 0.003;
-        const MIN_PUSH_LENGTH: f64 = MIN_PUSH * 1.5;
-
-        if player_delta.x.abs() < MIN_PUSH
-            && player_delta.z.abs() < MIN_PUSH
-            && additional_player_delta.length() < MIN_PUSH_LENGTH
-        {
-            additional_player_delta = additional_player_delta.normalize() * MIN_PUSH_LENGTH;
+/// `FluidState.getHeightForCamera`: a source block under a block with a sturdy
+/// bottom face counts as full.
+fn fluid_height_for_camera(fluid: &FluidState, world: &World, pos: BlockPos) -> f32 {
+    if fluid.amount == 8 {
+        let above_pos = pos.up(1);
+        let above = world.get_block_state(above_pos).unwrap_or_default();
+        if has_sturdy_bottom_face(above, above_pos) {
+            return 1.;
         }
-
-        physics.velocity += additional_player_delta;
     }
+    fluid_height(fluid, world, pos)
+}
 
-    match checking_fluid {
-        FluidKind::Water => physics.water_fluid_height = min_height_touching,
-        FluidKind::Lava => physics.lava_fluid_height = min_height_touching,
-        FluidKind::Empty => panic!("FluidKind::Empty should not be passed to update_fluid_height"),
-    };
-
-    touching_fluid
+/// `BlockState.isFaceSturdy(Direction.DOWN)`, from the collision shape: the
+/// block fills the whole bottom square of its cell. Vanilla reads the support
+/// shape, which differs from the collision shape for few blocks.
+fn has_sturdy_bottom_face(state: BlockState, pos: BlockPos) -> bool {
+    static BOTTOM_FACE: LazyLock<VoxelShape> =
+        LazyLock::new(|| box_shape(0., 0., 0., 1., 1. / 16., 1.));
+    let shape = state.collision_shape(pos);
+    !Shapes::matches_anywhere(&BOTTOM_FACE, &shape, |face, block| face && !block)
 }
 
 pub fn update_swimming() {
