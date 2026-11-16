@@ -266,6 +266,13 @@ pub fn update_crouching(
 #[derive(Clone, Component, Copy, Debug)]
 pub struct InLoadedChunk;
 
+/// Whether this client has the chunk of the block below the entity that affects
+/// its movement, by the client's own chunk cache rather than the shared world;
+/// vanilla's `travelInAir` only applies gravity there. Kept up to date for
+/// local players before physics.
+#[derive(Clone, Component, Copy, Debug, Default)]
+pub struct LoadedBelow(pub bool);
+
 /// Update the [`InLoadedChunk`] component for all entities in the world.
 pub fn update_in_loaded_chunk(
     mut commands: bevy_ecs::system::Commands,
