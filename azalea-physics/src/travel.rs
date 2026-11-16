@@ -1,11 +1,11 @@
 use azalea_block::{BlockState, fluid_state::FluidState};
 use azalea_core::{
     aabb::Aabb,
-    position::{BlockPos, Vec3},
+    position::{BlockPos, ChunkPos, Vec3},
 };
 use azalea_entity::{
-    Attributes, HasClientLoaded, Jumping, LocalEntity, LookDirection, OnClimbable, Physics,
-    PlayerAbilities, Pose, Position,
+    Attributes, HasClientLoaded, Jumping, LoadedBelow, LocalEntity, LookDirection, OnClimbable,
+    Physics, PlayerAbilities, Pose, Position,
     metadata::{FallFlying, Sprinting, Swimming},
     move_relative, view_vector,
 };
@@ -43,6 +43,7 @@ pub fn travel(
             &mut LookDirection,
             &mut Position,
             Option<&mut FallFlying>,
+            Option<&LoadedBelow>,
         ),
         (With<LocalEntity>, With<HasClientLoaded>),
     >,
@@ -65,6 +66,7 @@ pub fn travel(
         direction,
         position,
         fall_flying,
+        loaded_below,
     ) in &mut query
     {
         let Some(world_lock) = worlds.get(world_name) else {
@@ -107,9 +109,9 @@ pub fn travel(
             .as_deref()
             .is_some_and(|fall_flying| **fall_flying)
         {
-            travel_fall_flying(&mut ctx, &mut fall_flying.unwrap());
+            travel_fall_flying(&mut ctx, &mut fall_flying.unwrap(), loaded_below.copied());
         } else {
-            travel_in_air(&mut ctx);
+            travel_in_air(&mut ctx, loaded_below.copied());
         }
     }
 }
@@ -137,7 +139,7 @@ fn swim_towards_look(
 }
 
 /// The usual movement when we're not in water or using an elytra.
-fn travel_in_air(ctx: &mut MoveCtx) {
+fn travel_in_air(ctx: &mut MoveCtx, loaded_below: Option<LoadedBelow>) {
     let gravity = get_effective_gravity();
 
     let block_pos_below = get_block_pos_below_that_affects_movement(*ctx.position);
@@ -158,7 +160,27 @@ fn travel_in_air(ctx: &mut MoveCtx) {
     // this applies the current delta
     let mut movement = handle_relative_friction_and_calculate_movement(ctx, block_friction);
 
-    movement.y -= gravity;
+    // like `LivingEntity.travelInAir`, gravity only applies where the client
+    // has the chunk below (Azalea is always the client, so vanilla's server
+    // branch is left out); elsewhere the client sinks at a fixed 0.1 a tick,
+    // down to the world's min y. Levitation, which vanilla checks first, is not
+    // modelled here
+    let chunk_loaded = loaded_below.map_or_else(
+        || {
+            ctx.world
+                .chunks
+                .get(&ChunkPos::from(block_pos_below))
+                .is_some()
+        },
+        |loaded| loaded.0,
+    );
+    if chunk_loaded {
+        movement.y -= gravity;
+    } else if ctx.position.y > f64::from(ctx.world.chunks.min_y()) {
+        movement.y = -0.1;
+    } else {
+        movement.y = 0.0;
+    }
 
     // if (this.shouldDiscardFriction()) {
     //     this.setDeltaMovement(movement.x, yMovement, movement.z);
@@ -261,9 +283,13 @@ fn travel_in_fluid(ctx: &mut MoveCtx) {
     }
 }
 
-fn travel_fall_flying(ctx: &mut MoveCtx, fall_flying: &mut FallFlying) {
+fn travel_fall_flying(
+    ctx: &mut MoveCtx,
+    fall_flying: &mut FallFlying,
+    loaded_below: Option<LoadedBelow>,
+) {
     if *ctx.on_climbable {
-        travel_in_air(ctx);
+        travel_in_air(ctx, loaded_below);
         **fall_flying = false; // vanilla first set to true then set to false again, quite confusing
     } else {
         let look = ctx.direction;

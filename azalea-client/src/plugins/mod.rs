@@ -52,6 +52,7 @@ impl PluginGroup for DefaultPlugins {
             .add(block_update::BlockUpdatePlugin)
             .add(tick_end::TickEndPlugin)
             .add(loading::PlayerLoadedPlugin)
+            .add(loading::LoadedBelowPlugin)
             .add(brand::BrandPlugin)
             .add(client_information::ClientInformationPlugin)
             .add(tick_counter::TickCounterPlugin)
