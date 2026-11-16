@@ -71,7 +71,9 @@ impl Plugin for MovementPlugin {
                         .chain()
                         .in_set(PhysicsSystems)
                         .before(ai_step)
-                        .before(azalea_physics::fluids::update_in_water_state_and_do_fluid_pushing),
+                        // LocalPlayer.aiStep runs after Entity.baseTick has
+                        // updated the fluids and the swimming state
+                        .after(azalea_physics::fluids::update_swimming),
                     send_player_input_packet,
                     update_pose.before(EntityGeometryUpdateSystems),
                     send_sprinting_if_needed
@@ -383,9 +385,9 @@ pub fn local_player_ai_step(
 
         let trying_to_sprint = physics_state.trying_to_sprint;
 
-        // TODO: swimming
-        let is_underwater = false;
+        let is_underwater = physics.is_under_water();
         let is_in_water = physics.is_in_water();
+        let is_in_shallow_water = physics.is_in_shallow_water();
 
         let is_fall_flying = **fall_flying;
         // TODO: passenger
@@ -395,33 +397,45 @@ pub fn local_player_ai_step(
         // TODO: status effects
         let has_blindness = false;
 
-        let has_enough_impulse = has_enough_impulse_to_start_sprinting(physics_state);
+        // ClientInput.hasForwardImpulse
+        let has_forward_impulse = physics_state.move_vector.y > 1.0e-5;
+        let vehicle_can_sprint = false;
+        // LocalPlayer.isSprintingPossible
+        let is_sprinting_possible = |allowed_in_shallow_water: bool| {
+            !has_blindness
+                && if is_passenger {
+                    vehicle_can_sprint
+                } else {
+                    has_enough_food_to_sprint
+                }
+                && (allowed_in_shallow_water || !is_in_shallow_water)
+        };
 
         // LocalPlayer.canStartSprinting
         let can_start_sprinting = !**sprinting
-            && has_enough_impulse
-            && has_enough_food_to_sprint
+            && has_forward_impulse
+            && is_sprinting_possible(abilities.flying)
             && !using_item
-            && !has_blindness
-            && (!is_passenger || is_underwater)
             && (!is_fall_flying || is_underwater)
-            && (!is_moving_slowly(&crouching, fall_flying, pose, is_in_water) || is_underwater)
-            && (!is_in_water || is_underwater);
+            && (!is_moving_slowly(&crouching, fall_flying, pose, is_in_water) || is_underwater);
         if trying_to_sprint && can_start_sprinting {
             set_sprinting(true, &mut sprinting, &mut attributes);
         }
 
         if **sprinting {
-            // TODO: swimming
-
-            let vehicle_can_sprint = false;
-            // shouldStopRunSprinting
-            let should_stop_sprinting = has_blindness
-                || (is_passenger && !vehicle_can_sprint)
-                || !has_enough_impulse
-                || !has_enough_food_to_sprint
-                || (physics.horizontal_collision && !physics.minor_horizontal_collision)
-                || (is_in_water && !is_underwater);
+            let should_stop_sprinting = if is_swimming {
+                // LocalPlayer.shouldStopSwimSprinting
+                !is_sprinting_possible(true)
+                    || !is_in_water
+                    || !has_forward_impulse
+                        && !physics.on_ground()
+                        && !physics_state.trying_to_crouch
+            } else {
+                // LocalPlayer.shouldStopRunSprinting
+                !is_sprinting_possible(abilities.flying)
+                    || !has_forward_impulse
+                    || (physics.horizontal_collision && !physics.minor_horizontal_collision)
+            };
             if should_stop_sprinting {
                 set_sprinting(false, &mut sprinting, &mut attributes);
             }
@@ -684,15 +698,6 @@ fn set_sprinting(
             .remove(&azalea_entity::attributes::sprinting_modifier().id)
             .is_none()
     }
-}
-
-// Whether the player is moving fast enough to be able to start sprinting.
-fn has_enough_impulse_to_start_sprinting(physics_state: &ClientMovementState) -> bool {
-    // if self.underwater() {
-    //     self.has_forward_impulse()
-    // } else {
-    physics_state.move_vector.y > 0.8
-    // }
 }
 
 /// An event sent by the server that sets or adds to our velocity.
