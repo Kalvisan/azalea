@@ -305,6 +305,12 @@ pub struct Physics {
     pub water_fluid_height: f64,
     pub lava_fluid_height: f64,
     pub was_touching_water: bool,
+    /// Whether the eyes were in water at the last fluid update.
+    pub eye_in_water: bool,
+    /// Whether the eyes were in water at the update before the last one, which
+    /// is what vanilla's `wasEyeInWater` and `Player.wasUnderwater` hold
+    /// during a tick.
+    pub was_eye_in_water: bool,
 
     pub fall_distance: f64,
     // TODO: implement remaining_fire_ticks
@@ -339,6 +345,8 @@ impl Physics {
             water_fluid_height: 0.,
             lava_fluid_height: 0.,
             was_touching_water: false,
+            eye_in_water: false,
+            was_eye_in_water: false,
 
             fall_distance: 0.,
             remaining_fire_ticks: 0,
@@ -374,6 +382,15 @@ impl Physics {
 
     pub fn is_in_water(&self) -> bool {
         self.was_touching_water
+    }
+    /// `LocalPlayer.isUnderWater`: the eyes were in water at the start of the
+    /// tick.
+    pub fn is_under_water(&self) -> bool {
+        self.was_eye_in_water
+    }
+    /// `Entity.isInShallowWater`.
+    pub fn is_in_shallow_water(&self) -> bool {
+        self.is_in_water() && !self.is_under_water()
     }
     pub fn is_in_lava(&self) -> bool {
         // TODO: also check `!this.firstTick &&`
