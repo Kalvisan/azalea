@@ -7,7 +7,9 @@ use azalea_core::{
     position::{BlockPos, Vec3},
 };
 
-use super::{Edge, ExecuteCtx, IsReachedCtx, MoveData, MovesCtx, default_is_reached};
+use super::{
+    Edge, ExecuteCtx, IsReachedCtx, MoveData, MovesCtx, default_is_reached, traverse_is_reached,
+};
 use crate::pathfinder::{
     astar, costs::*, moves::BARITONE_COMPAT, player_pos_to_block_pos, positions::RelBlockPos,
 };
@@ -60,7 +62,7 @@ fn forward_move(ctx: &mut MovesCtx, pos: RelBlockPos) {
                 target: new_pos,
                 data: MoveData {
                     execute: &execute_forward_move,
-                    is_reached: &default_is_reached,
+                    is_reached: &traverse_is_reached,
                 },
             },
             cost,
@@ -466,7 +468,7 @@ fn diagonal_move(ctx: &mut MovesCtx, pos: RelBlockPos) {
                 target: new_position,
                 data: MoveData {
                     execute: &execute_diagonal_move,
-                    is_reached: &default_is_reached,
+                    is_reached: &traverse_is_reached,
                 },
             },
             cost,
