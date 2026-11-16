@@ -737,6 +737,7 @@ pub fn update_pose(
         &Physics,
         &ClientMovementState,
         &FallFlying,
+        &metadata::Swimming,
         &GameMode,
         &WorldHolder,
         &Position,
@@ -750,6 +751,7 @@ pub fn update_pose(
         physics,
         physics_state,
         fall_flying,
+        swimming,
         &game_mode,
         world_holder,
         position,
@@ -771,11 +773,13 @@ pub fn update_pose(
         }
 
         // TODO: implement everything else from getDesiredPose: sleeping,
-        // swimming, fallFlying, spinAttack
-        let desired_pose = if physics_state.trying_to_crouch {
-            Pose::Crouching
+        // spinAttack
+        let desired_pose = if **swimming {
+            Pose::Swimming
         } else if **fall_flying {
             Pose::FallFlying
+        } else if physics_state.trying_to_crouch {
+            Pose::Crouching
         } else {
             Pose::Standing
         };

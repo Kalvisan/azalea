@@ -9,7 +9,9 @@ use azalea_core::{
     position::{BlockPos, ChunkPos, Vec3},
 };
 use azalea_entity::{
-    HasClientLoaded, LocalEntity, Physics, Position, dimensions::EntityDimensions,
+    HasClientLoaded, LocalEntity, Physics, PlayerAbilities, Position,
+    dimensions::EntityDimensions,
+    metadata::{Sprinting, Swimming},
 };
 use azalea_registry::builtin::BlockKind;
 use azalea_world::{World, WorldName, Worlds};
@@ -226,8 +228,43 @@ fn has_sturdy_bottom_face(state: BlockState, pos: BlockPos) -> bool {
     !Shapes::matches_anywhere(&BOTTOM_FACE, &shape, |face, block| face && !block)
 }
 
-pub fn update_swimming() {
-    // TODO: swimming
+/// `Player.updateSwimming`: sprinting under water starts swimming, which
+/// lasts while the entity keeps sprinting in water and is not flying.
+#[allow(clippy::type_complexity)]
+pub fn update_swimming(
+    mut query: Query<
+        (
+            &mut Swimming,
+            &Sprinting,
+            &Physics,
+            &Position,
+            &WorldName,
+            Option<&PlayerAbilities>,
+        ),
+        (With<LocalEntity>, With<HasClientLoaded>),
+    >,
+    worlds: Res<Worlds>,
+) {
+    for (mut swimming, sprinting, physics, position, world_name, abilities) in &mut query {
+        // TODO: passengers never swim
+        let swims = if abilities.is_some_and(|abilities| abilities.flying) {
+            false
+        } else if **swimming {
+            **sprinting && physics.is_in_water()
+        } else {
+            let Some(world_lock) = worlds.get(world_name) else {
+                continue;
+            };
+            let in_water_block = world_lock
+                .read()
+                .get_fluid_state(BlockPos::from(*position))
+                .is_some_and(|fluid| fluid.kind == FluidKind::Water);
+            **sprinting && physics.is_under_water() && in_water_block
+        };
+        if **swimming != swims {
+            **swimming = swims;
+        }
+    }
 }
 
 // FlowingFluid.getFlow
