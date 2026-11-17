@@ -20,7 +20,7 @@ use bevy_ecs::{
 };
 use parking_lot::RwLock;
 use tokio::{sync::oneshot, time};
-use tracing::{info, warn};
+use tracing::{debug, info};
 
 use crate::{
     attack,
@@ -173,6 +173,9 @@ async fn run_schedule_loop(
     const UPDATE_DURATION_TARGET: Duration = Duration::from_micros(1_000_000 / 60);
     // minecraft runs at 20 tps
     const GAME_TICK_DURATION_TARGET: Duration = Duration::from_micros(1_000_000 / 20);
+    // a stalled frame's missed ticks are dropped rather than caught up, since a
+    // burst of catch-up ticks sends movement faster than real time
+    const MAX_TICKS_BEHIND: u32 = 1;
 
     loop {
         // sleep until the next update if necessary
@@ -196,14 +199,10 @@ async fn run_schedule_loop(
             if let Some(last_tick) = &mut last_tick {
                 *last_tick += GAME_TICK_DURATION_TARGET;
 
-                // if we're more than 10 ticks behind, set last_tick to now.
-                // vanilla doesn't do it in exactly the same way but it
-                // shouldn't really matter
-                if (now - *last_tick) > GAME_TICK_DURATION_TARGET * 10 {
-                    warn!(
-                        "GameTick is more than 10 ticks behind, skipping ticks so we don't have to burst too much"
-                    );
-                    *last_tick = now;
+                let tick_now = Instant::now();
+                if (tick_now - *last_tick) > GAME_TICK_DURATION_TARGET * MAX_TICKS_BEHIND {
+                    debug!("GameTick is more than {MAX_TICKS_BEHIND} tick behind, skipping the missed ticks");
+                    *last_tick = tick_now;
                 }
             } else {
                 last_tick = Some(now);
