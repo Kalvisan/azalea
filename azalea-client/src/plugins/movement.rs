@@ -383,6 +383,11 @@ pub fn local_player_ai_step(
 
         // TODO: double tapping w to sprint i think
 
+        // the server's entity data can set the sprinting flag after a stop removed the speed
+        // modifier, so the speed follows the flag that decides the sprinting packets
+        let flagged_sprinting = **sprinting;
+        set_sprinting(flagged_sprinting, &mut sprinting, &mut attributes);
+
         let trying_to_sprint = physics_state.trying_to_sprint;
 
         let is_underwater = physics.is_under_water();
