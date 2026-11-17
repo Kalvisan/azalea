@@ -5,6 +5,7 @@ pub mod client_movement;
 pub mod clip;
 pub mod collision;
 pub mod fluids;
+pub mod push;
 pub mod travel;
 
 use std::collections::HashSet;
@@ -48,6 +49,7 @@ impl Plugin for PhysicsPlugin {
                 ai_step,
                 travel::travel,
                 apply_effects_from_blocks,
+                push::push_entities,
             )
                 .chain()
                 .in_set(PhysicsSystems)
