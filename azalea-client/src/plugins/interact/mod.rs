@@ -267,11 +267,18 @@ pub fn handle_start_use_item_queued(
                         },
                     ));
                 } else {
+                    let clamped = r.with_location_in_block();
+                    if clamped.location.distance_to(r.location) > 1e-6 {
+                        warn!(
+                            "use-item cursor outside the clicked block {:?}: location {:?} clamped to {:?}",
+                            r.block_pos, r.location, clamped.location
+                        );
+                    }
                     commands.trigger(SendGamePacketEvent::new(
                         entity,
                         ServerboundUseItemOn {
                             hand: start_use_item.hand,
-                            block_hit: r.into(),
+                            block_hit: (&clamped).into(),
                             seq,
                         },
                     ));

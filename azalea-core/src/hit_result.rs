@@ -97,6 +97,27 @@ impl BlockHitResult {
         }
     }
 
+    /// The hit with its location moved inside the hit block's cell, each
+    /// coordinate clamped to `[block, block + 1]`, which is the range of
+    /// the cursor a vanilla client sends with a block interaction (the
+    /// cursor is `location - block_pos`).
+    ///
+    /// A raycast can name one block while its location lies on a thin shape
+    /// of a neighbouring cell; sent as is, that cursor falls outside
+    /// `[0, 1]`, which servers' anticheats flag as a fabricated placement.
+    pub fn with_location_in_block(&self) -> Self {
+        let min = self.block_pos.to_vec3_floored();
+        let clamp = |value: f64, low: f64| value.clamp(low, low + 1.0);
+        Self {
+            location: Vec3::new(
+                clamp(self.location.x, min.x),
+                clamp(self.location.y, min.y),
+                clamp(self.location.z, min.z),
+            ),
+            ..*self
+        }
+    }
+
     pub fn with_direction(&self, direction: Direction) -> Self {
         Self { direction, ..*self }
     }
