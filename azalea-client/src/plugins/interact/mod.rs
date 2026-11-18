@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use azalea_block::BlockState;
 use azalea_core::{
+    aabb::Aabb,
     delta::LpVec3,
     direction::Direction,
     game_type::GameMode,
@@ -22,8 +23,9 @@ use azalea_entity::{
 };
 use azalea_inventory::{ItemStack, ItemStackData, components};
 use azalea_physics::{
-    PhysicsSystems, client_movement::ClientMovementState,
-    collision::entity_collisions::update_last_bounding_box,
+    PhysicsSystems,
+    client_movement::ClientMovementState,
+    collision::{BlockWithShape, entity_collisions::update_last_bounding_box},
 };
 use azalea_protocol::packets::game::{
     ServerboundInteract, ServerboundUseItem, s_interact::InteractionHand,
@@ -88,7 +90,6 @@ struct ServerVerifiedState {
     block_state: BlockState,
     /// Used for teleporting the player back if we're colliding with the block
     /// that got placed back.
-    #[allow(unused)]
     player_pos: Vec3,
 }
 
@@ -139,7 +140,17 @@ impl BlockStatePredictionHandler {
         }
     }
 
-    pub fn end_prediction_up_to(&mut self, seq: u32, world: &World) {
+    /// Ends the predictions up to `seq`, puts back the server's state of every
+    /// block it differs on, and returns where the player stood when it
+    /// predicted a block that is put back into the player's bounding box, so
+    /// the caller snaps the player back there as the vanilla client does.
+    pub fn end_prediction_up_to(
+        &mut self,
+        seq: u32,
+        world: &World,
+        bounding_box: &Aabb,
+    ) -> Option<Vec3> {
+        let mut snap_to = None;
         let mut to_remove = Vec::new();
         for (pos, state) in &self.server_state {
             if state.seq > seq {
@@ -154,16 +165,27 @@ impl BlockStatePredictionHandler {
                 continue;
             }
             world.set_block_state(*pos, server_block_state);
-            // TODO: implement these two functions
-            // if is_colliding(player, *pos, server_block_state) {
-            //     abs_snap_to(state.player_pos);
-            // }
+            if is_colliding(*pos, server_block_state, bounding_box) {
+                snap_to = Some(state.player_pos);
+            }
         }
 
         for pos in to_remove {
             self.server_state.remove(&pos);
         }
+        snap_to
     }
+}
+
+/// Whether a block's collision shape at `pos` overlaps the bounding box, as the
+/// vanilla client's `Entity::isColliding`.
+fn is_colliding(pos: BlockPos, state: BlockState, bounding_box: &Aabb) -> bool {
+    state
+        .collision_shape(pos)
+        .move_relative(pos.to_vec3_floored())
+        .to_aabbs()
+        .iter()
+        .any(|block_box| block_box.intersects_aabb(bounding_box))
 }
 
 /// An event that makes one of our clients simulate a right-click.

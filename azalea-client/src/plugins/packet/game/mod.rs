@@ -1110,14 +1110,24 @@ impl GamePacketHandler<'_> {
     pub fn award_stats(&mut self, _p: &ClientboundAwardStats) {}
 
     pub fn block_changed_ack(&mut self, p: &ClientboundBlockChangedAck) {
-        as_system::<Query<(&WorldHolder, &mut BlockStatePredictionHandler)>>(
-            self.ecs,
-            |mut query| {
-                let (local_player, mut prediction_handler) = query.get_mut(self.player).unwrap();
-                let world = local_player.shared.read();
-                prediction_handler.end_prediction_up_to(p.seq, &world);
-            },
-        );
+        as_system::<
+            Query<(
+                &WorldHolder,
+                &mut BlockStatePredictionHandler,
+                &mut Physics,
+                &mut Position,
+            )>,
+        >(self.ecs, |mut query| {
+            let (local_player, mut prediction_handler, mut physics, mut position) =
+                query.get_mut(self.player).unwrap();
+            let world = local_player.shared.read();
+            if let Some(snap_to) =
+                prediction_handler.end_prediction_up_to(p.seq, &world, &physics.bounding_box)
+            {
+                **position = snap_to;
+                physics.set_old_pos(Position::new(snap_to));
+            }
+        });
     }
 
     pub fn block_destruction(&mut self, _p: &ClientboundBlockDestruction) {}
