@@ -91,6 +91,12 @@ impl Plugin for MovementPlugin {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub struct MoveEventsSystems;
 
+/// Marks a player the server moved with a player position packet (a teleport or
+/// a setback) since its pathfinder last looked, so a path being followed is
+/// patched from where the player now stands.
+#[derive(Clone, Component, Debug)]
+pub struct ServerTeleported;
+
 /// A component that contains the look direction that was last sent over the
 /// network.
 #[derive(Clone, Component, Debug, Default)]
