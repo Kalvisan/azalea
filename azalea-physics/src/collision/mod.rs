@@ -8,7 +8,7 @@ pub mod world_collisions;
 
 use std::{ops::Add, sync::LazyLock};
 
-use azalea_block::{BlockState, BlockTrait, fluid_state::FluidState};
+use azalea_block::{BlockState, fluid_state::FluidState};
 use azalea_core::{
     aabb::Aabb,
     direction::Axis,
@@ -212,8 +212,8 @@ pub fn move_colliding(ctx: &mut MoveCtx, mut movement: Vec3) {
 
     if vertical_collision {
         // blockBelow.updateEntityAfterFallOn(this.level, this);
-        // the default implementation of updateEntityAfterFallOn sets the y movement to
-        // 0
+        // the default implementation of updateEntityAfterFallOn sets the y
+        // movement to 0
         physics.velocity.y = 0.;
     }
 
@@ -494,8 +494,7 @@ pub fn legacy_blocks_motion(block: BlockState) -> bool {
 
 pub fn legacy_calculate_solid(block: BlockState) -> bool {
     // force_solid has to be checked before anything else
-    let block_trait = Box::<dyn BlockTrait>::from(block);
-    if let Some(solid) = block_trait.behavior().force_solid {
+    if let Some(solid) = block.behavior().force_solid {
         return solid;
     }
 
