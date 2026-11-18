@@ -8,6 +8,7 @@ use azalea_client::{
     StartSprintEvent, StartWalkEvent,
     local_player::WorldHolder,
     mining::{Mining, MiningSystems, StartMiningBlockEvent},
+    movement::ServerTeleported,
 };
 use azalea_core::{position::Vec3, tick::GameTick};
 use azalea_entity::{Physics, Position, inventory::Inventory};
@@ -264,8 +265,10 @@ pub fn timeout_movement(
         &Inventory,
         Option<&CustomPathfinderState>,
         Option<&mut SimulatingPathState>,
+        Option<&ServerTeleported>,
     )>,
     worlds: Res<Worlds>,
+    mut commands: Commands,
 ) {
     for (
         entity,
@@ -276,9 +279,33 @@ pub fn timeout_movement(
         world_name,
         inventory,
         custom_state,
-        simulating_path_state,
+        mut simulating_path_state,
+        teleported,
     ) in &mut query
     {
+        if teleported.is_some() {
+            commands.entity(entity).remove::<ServerTeleported>();
+            if !executing_path.path.is_empty() && !pathfinder.is_calculating {
+                warn!(
+                    "the server moved the player, patching the path from {}",
+                    **position
+                );
+                if let Some(simulating_path_state) = simulating_path_state.as_mut() {
+                    **simulating_path_state = SimulatingPathState::Fail;
+                }
+                patch_path_from_timeout(
+                    entity,
+                    &mut executing_path,
+                    &mut pathfinder,
+                    &worlds,
+                    position,
+                    world_name,
+                    custom_state,
+                    inventory,
+                );
+                continue;
+            }
+        }
         if !executing_path.path.is_empty() {
             let (start, end) = if let Some(s) = &simulating_path_state
                 && let SimulatingPathState::Simulated(simulating_path_state) = &**s

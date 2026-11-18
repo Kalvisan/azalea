@@ -432,6 +432,9 @@ impl GamePacketHandler<'_> {
                 .apply(&p.change, &mut position, &mut direction, &mut physics);
             // old_pos is set to the current position when we're teleported
             physics.set_old_pos(*position);
+            commands
+                .entity(self.player)
+                .insert(crate::movement::ServerTeleported);
 
             // send the relevant packets
             commands.trigger(SendGamePacketEvent::new(
