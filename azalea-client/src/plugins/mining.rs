@@ -352,6 +352,9 @@ pub fn handle_mining_queued(
                 ) >= 1.
             {
                 // block was broken instantly (instamined)
+                if mining.is_some() {
+                    commands.entity(entity).remove::<Mining>();
+                }
                 commands.trigger(FinishMiningBlockEvent {
                     entity,
                     position: mining_queued.position,
