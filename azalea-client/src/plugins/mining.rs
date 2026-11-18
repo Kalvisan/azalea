@@ -360,7 +360,7 @@ pub fn handle_mining_queued(
                     force: mining_queued.force,
                 };
                 trace!("inserting mining component {mining:?} for entity {entity:?}");
-                commands.entity(entity).insert(mining);
+                commands.entity(entity).insert((mining, MineStarted));
                 **current_mining_pos = Some(mining_queued.position);
                 **current_mining_item = held_item.clone();
                 **mine_progress = 0.;
@@ -382,8 +382,6 @@ pub fn handle_mining_queued(
                 },
             ));
             commands.trigger(SwingArmEvent { entity });
-            // another swing packet gets sent in the same tick in
-            // continue_mining_block, vanilla does this too
         }
     }
 }
@@ -411,9 +409,27 @@ fn is_same_mining_target(
     current_mining_pos: &MineBlockPos,
     current_mining_item: &MineItem,
 ) -> bool {
-    let held_item = inventory.held_item();
-    Some(target_block) == current_mining_pos.0 && held_item == &current_mining_item.0
+    Some(target_block) == current_mining_pos.0
+        && is_same_item(inventory.held_item(), current_mining_item)
 }
+
+/// Whether the held item is the one a dig started with, as the vanilla client
+/// compares them: the same item with the same components, whatever the count.
+fn is_same_item(held_item: &ItemStack, current_mining_item: &MineItem) -> bool {
+    match (held_item, &current_mining_item.0) {
+        (ItemStack::Empty, ItemStack::Empty) => true,
+        (ItemStack::Present(held), ItemStack::Present(mined)) => {
+            held.is_same_item_and_components(mined)
+        }
+        _ => false,
+    }
+}
+
+/// Marks a dig whose `StartDestroyBlock` was sent this tick: the vanilla client
+/// adds no progress in the tick it starts a dig while the attack key is held,
+/// so the stop goes out after the full number of ticks the block takes.
+#[derive(Clone, Component, Debug)]
+pub struct MineStarted;
 
 /// A component bundle for players that can mine blocks.
 #[derive(Bundle, Clone, Default)]
@@ -589,7 +605,7 @@ pub fn continue_mining_block(
         &FluidOnEyes,
         &Physics,
         &Attributes,
-        &Mining,
+        (&Mining, Option<&MineStarted>),
         &mut MineDelay,
         &mut MineProgress,
         &mut MineTicks,
@@ -610,13 +626,17 @@ pub fn continue_mining_block(
         fluid_on_eyes,
         physics,
         attributes,
-        mining,
+        (mining, started),
         mut mine_delay,
         mut mine_progress,
         mut mine_ticks,
         mut prediction_handler,
     ) in query.iter_mut()
     {
+        if started.is_some() {
+            commands.entity(entity).remove::<MineStarted>();
+            continue;
+        }
         if game_mode == GameMode::Creative {
             // TODO: worldborder check
             **mine_delay = 5;
@@ -634,13 +654,8 @@ pub fn continue_mining_block(
                 position: mining.pos,
             });
             commands.trigger(SwingArmEvent { entity });
-        } else if mining.force
-            || is_same_mining_target(
-                mining.pos,
-                inventory,
-                current_mining_pos,
-                current_mining_item,
-            )
+        } else if is_same_item(inventory.held_item(), current_mining_item)
+            && (mining.force || current_mining_pos.0 == Some(mining.pos))
         {
             trace!("continue mining block at {:?}", mining.pos);
             let world_lock = worlds.get(world_name).unwrap();
@@ -702,7 +717,7 @@ pub fn continue_mining_block(
             commands.entity(entity).insert(MiningQueued {
                 position: mining.pos,
                 direction: mining.dir,
-                force: false,
+                force: mining.force,
             });
         }
     }
