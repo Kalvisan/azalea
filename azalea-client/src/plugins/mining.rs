@@ -263,6 +263,9 @@ pub fn handle_mining_queued(
     ) in query
     {
         trace!("handle_mining_queued {mining_queued:?}");
+        if game_mode != GameMode::Creative && **mine_delay > 0 {
+            continue;
+        }
         commands.entity(entity).remove::<MiningQueued>();
 
         let world = world_holder.shared.read();
