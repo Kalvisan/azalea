@@ -223,7 +223,10 @@ impl LookDirection {
         let delta_x_rot = (delta_x_rot / sensitivity).round() * sensitivity;
 
         self.y_rot += delta_y_rot;
-        self.x_rot += delta_x_rot;
+        // the vanilla client's Entity::turn clamps the pitch after adding the
+        // rounded delta, so a turn that rounds past straight up or down sends
+        // exactly -90 or 90
+        self.x_rot = (self.x_rot + delta_x_rot).clamp(-90., 90.);
     }
 
     /// Force the [`Self::x_rot`] to be between -90 and 90 degrees, and return
@@ -242,7 +245,7 @@ impl From<LookDirection> for (f32, f32) {
 }
 impl From<(f32, f32)> for LookDirection {
     fn from((y_rot, x_rot): (f32, f32)) -> Self {
-        Self { y_rot, x_rot }
+        Self::new(y_rot, x_rot)
     }
 }
 
