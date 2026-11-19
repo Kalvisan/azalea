@@ -137,6 +137,9 @@ pub struct Mining {
     pub dir: Direction,
     /// See [`MiningQueued::force`].
     pub force: bool,
+    /// The face last sent to the server for this dig, so a change of the
+    /// face mid-dig is sent as vanilla's `ChangeDestroyDirection`.
+    pub sent_dir: Direction,
 }
 
 /// Start mining the block at the given position.
@@ -364,6 +367,7 @@ pub fn handle_mining_queued(
                     pos: mining_queued.position,
                     dir: mining_queued.direction,
                     force: mining_queued.force,
+                    sent_dir: mining_queued.direction,
                 };
                 trace!("inserting mining component {mining:?} for entity {entity:?}");
                 commands.entity(entity).insert((mining, MineStarted));
@@ -611,7 +615,7 @@ pub fn continue_mining_block(
         &FluidOnEyes,
         &Physics,
         &Attributes,
-        (&Mining, Option<&MineStarted>),
+        (&mut Mining, Option<&MineStarted>),
         &mut MineDelay,
         &mut MineProgress,
         &mut MineTicks,
@@ -632,7 +636,7 @@ pub fn continue_mining_block(
         fluid_on_eyes,
         physics,
         attributes,
-        (mining, started),
+        (mut mining, started),
         mut mine_delay,
         mut mine_progress,
         mut mine_ticks,
@@ -710,6 +714,17 @@ pub fn continue_mining_block(
                 **mine_progress = 0.;
                 **mine_ticks = 0.;
                 **mine_delay = 5;
+            } else if mining.sent_dir != mining.dir {
+                mining.sent_dir = mining.dir;
+                commands.trigger(SendGamePacketEvent::new(
+                    entity,
+                    ServerboundPlayerAction {
+                        action: s_player_action::Action::ChangeDestroyDirection,
+                        pos: mining.pos,
+                        direction: mining.dir,
+                        seq: 0,
+                    },
+                ));
             }
 
             mine_block_progress_events.write(MineBlockProgressEvent {
