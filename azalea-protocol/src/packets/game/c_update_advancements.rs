@@ -3,11 +3,11 @@ use std::{
     io::{self, Cursor, Write},
 };
 
-use azalea_buf::AzBuf;
+use azalea_buf::{AzBuf, AzBufVar};
 use azalea_chat::FormattedText;
-use azalea_inventory::ItemStack;
+use azalea_inventory::{DataComponentPatch, ItemStackData};
 use azalea_protocol_macros::ClientboundGamePacket;
-use azalea_registry::identifier::Identifier;
+use azalea_registry::{builtin::ItemKind, identifier::Identifier};
 use indexmap::IndexMap;
 
 #[derive(AzBuf, ClientboundGamePacket, Clone, Debug, PartialEq)]
@@ -31,20 +31,30 @@ pub struct Advancement {
 pub struct DisplayInfo {
     pub title: FormattedText,
     pub description: FormattedText,
-    pub icon: ItemStack,
+    /// The icon is an item stack template on the wire: the item, then the
+    /// count as a varint, then the component patch. Unlike a slot, it can't be
+    /// empty, so there's no leading count.
+    pub icon: ItemStackData,
     pub frame: FrameType,
     pub show_toast: bool,
     pub hidden: bool,
     pub background: Option<Identifier>,
-    pub x: f32,
-    pub y: f32,
 }
 
 impl AzBuf for DisplayInfo {
     fn azalea_read(buf: &mut Cursor<&[u8]>) -> Result<Self, azalea_buf::BufReadError> {
         let title = AzBuf::azalea_read(buf)?;
         let description = AzBuf::azalea_read(buf)?;
-        let icon = AzBuf::azalea_read(buf)?;
+
+        let kind = ItemKind::azalea_read(buf)?;
+        let count = i32::azalea_read_var(buf)?;
+        let component_patch = DataComponentPatch::azalea_read(buf)?;
+        let icon = ItemStackData {
+            kind,
+            count,
+            component_patch,
+        };
+
         let frame = AzBuf::azalea_read(buf)?;
 
         let data = u32::azalea_read(buf)?;
@@ -57,8 +67,6 @@ impl AzBuf for DisplayInfo {
         } else {
             None
         };
-        let x = AzBuf::azalea_read(buf)?;
-        let y = AzBuf::azalea_read(buf)?;
         Ok(DisplayInfo {
             title,
             description,
@@ -67,14 +75,16 @@ impl AzBuf for DisplayInfo {
             show_toast,
             hidden,
             background,
-            x,
-            y,
         })
     }
     fn azalea_write(&self, buf: &mut impl Write) -> io::Result<()> {
         self.title.azalea_write(buf)?;
         self.description.azalea_write(buf)?;
-        self.icon.azalea_write(buf)?;
+
+        self.icon.kind.azalea_write(buf)?;
+        self.icon.count.azalea_write_var(buf)?;
+        self.icon.component_patch.azalea_write(buf)?;
+
         self.frame.azalea_write(buf)?;
 
         let mut data: u32 = 0;
@@ -92,8 +102,6 @@ impl AzBuf for DisplayInfo {
         if let Some(background) = &self.background {
             background.azalea_write(buf)?;
         }
-        self.x.azalea_write(buf)?;
-        self.y.azalea_write(buf)?;
         Ok(())
     }
 }
@@ -112,12 +120,16 @@ pub struct CriterionProgress {
     pub date: Option<u64>,
 }
 
+/// An advancement with its position in the advancements screen.
+///
+/// Since 26.3 the position is sent here instead of in [`DisplayInfo`].
 #[derive(AzBuf, Clone, Debug, PartialEq)]
 pub struct PositionedAdvancement {
     pub advancement: AdvancementHolder,
     pub x: f32,
     pub y: f32,
 }
+
 #[derive(AzBuf, Clone, Debug, PartialEq)]
 pub struct AdvancementHolder {
     pub id: Identifier,
@@ -133,7 +145,7 @@ mod tests {
     #[test]
     fn test() {
         let packet = ClientboundUpdateAdvancements {
-            reset: true,
+            should_reset: true,
             added: [PositionedAdvancement {
                 advancement: AdvancementHolder {
                     id: Identifier::new("minecraft:test"),
@@ -142,13 +154,11 @@ mod tests {
                         display: Some(Box::new(DisplayInfo {
                             title: FormattedText::from("title".to_owned()),
                             description: FormattedText::from("description".to_owned()),
-                            icon: ItemStack::Empty,
+                            icon: ItemStackData::new(ItemKind::Stone, 1),
                             frame: FrameType::Task,
                             show_toast: true,
                             hidden: false,
                             background: None,
-                            x: 0.0,
-                            y: 0.0,
                         })),
                         requirements: Vec::new(),
                         sends_telemetry_event: false,
@@ -181,15 +191,15 @@ mod tests {
         let mut buf: Cursor<&[u8]> = Cursor::new(&data);
 
         let read_packet = ClientboundUpdateAdvancements::azalea_read(&mut buf).unwrap();
-        assert_eq!(packet.reset, read_packet.reset);
+        assert_eq!(packet.should_reset, read_packet.should_reset);
         assert_eq!(packet.removed, read_packet.removed);
 
         let advancement = packet
             .added
             .into_iter()
             .find_map(|a| {
-                if a.id == Identifier::new("minecraft:test") {
-                    Some(a.value)
+                if a.advancement.id == Identifier::new("minecraft:test") {
+                    Some(a.advancement.value)
                 } else {
                     None
                 }
@@ -200,8 +210,8 @@ mod tests {
             .added
             .into_iter()
             .find_map(|a| {
-                if a.id == Identifier::new("minecraft:test") {
-                    Some(a.value)
+                if a.advancement.id == Identifier::new("minecraft:test") {
+                    Some(a.advancement.value)
                 } else {
                     None
                 }
@@ -214,5 +224,6 @@ mod tests {
         let read_display = read_advancement.display.unwrap();
         assert_eq!(display.title, read_display.title);
         assert_eq!(display.description, read_display.description);
+        assert_eq!(display.icon, read_display.icon);
     }
 }
