@@ -64,46 +64,40 @@ fn collide(ctx: &MoveCtx, movement: Vec3) -> Vec3 {
     let y_collision = movement.y != collided_delta.y;
     let z_collision = movement.z != collided_delta.z;
 
-    let on_ground = ctx.physics.on_ground() || y_collision && movement.y < 0.;
+    let landed = y_collision && movement.y < 0.;
 
-    let max_up_step = 0.6;
-    if max_up_step > 0. && on_ground && (x_collision || z_collision) {
-        let mut step_to_delta = collide_bounding_box(
-            movement.with_y(max_up_step),
-            &entity_bounding_box,
-            world,
-            &entity_collisions,
-        );
-        let directly_up_delta = collide_bounding_box(
-            Vec3::ZERO.with_y(max_up_step),
-            &entity_bounding_box.expand_towards(Vec3::new(movement.x, 0., movement.z)),
-            world,
-            &entity_collisions,
-        );
-        if directly_up_delta.y < max_up_step {
-            let target_movement = collide_bounding_box(
-                movement.with_y(0.),
-                &entity_bounding_box.move_relative(directly_up_delta),
-                world,
-                &entity_collisions,
-            )
-            .add(directly_up_delta);
-            if target_movement.horizontal_distance_squared()
-                > step_to_delta.horizontal_distance_squared()
-            {
-                step_to_delta = target_movement;
-            }
+    let max_up_step = get_max_up_step(ctx.attributes);
+    if max_up_step > 0. && (landed || ctx.physics.on_ground()) && (x_collision || z_collision) {
+        // steps are measured from where the fall stopped, so landing beside a
+        // full block never climbs it
+        let step_from = if landed {
+            entity_bounding_box.move_relative(Vec3::new(0., collided_delta.y, 0.))
+        } else {
+            entity_bounding_box
+        };
+        let mut step_space =
+            step_from.expand_towards(Vec3::new(movement.x, max_up_step as f64, movement.z));
+        if !landed {
+            step_space = step_space.expand_towards(Vec3::new(0., -1.0E-5_f32 as f64, 0.));
         }
-
-        if step_to_delta.horizontal_distance_squared()
-            > collided_delta.horizontal_distance_squared()
-        {
-            return step_to_delta.add(collide_bounding_box(
-                Vec3::ZERO.with_y(-step_to_delta.y + movement.y),
-                &entity_bounding_box.move_relative(step_to_delta),
-                world,
-                &entity_collisions,
-            ));
+        let colliders = collect_colliders(world, &entity_collisions, &step_space);
+        let heights = candidate_step_up_heights(
+            &step_from,
+            &colliders,
+            max_up_step,
+            collided_delta.y as f32,
+        );
+        for height in heights {
+            let stepped = collide_with_shapes(
+                Vec3::new(movement.x, height as f64, movement.z),
+                step_from,
+                &colliders,
+            );
+            if stepped.horizontal_distance_squared() > collided_delta.horizontal_distance_squared()
+            {
+                let fallen = entity_bounding_box.min.y - step_from.min.y;
+                return stepped.add(Vec3::new(0., -fallen, 0.));
+            }
         }
     }
 
@@ -382,18 +376,49 @@ fn collide_bounding_box(
     world: &World,
     entity_collisions: &[VoxelShape],
 ) -> Vec3 {
-    let mut collision_boxes: Vec<VoxelShape> = Vec::with_capacity(entity_collisions.len() + 1);
+    let collision_boxes = collect_colliders(
+        world,
+        entity_collisions,
+        &entity_bounding_box.expand_towards(movement),
+    );
+    collide_with_shapes(movement, *entity_bounding_box, &collision_boxes)
+}
 
-    if !entity_collisions.is_empty() {
-        collision_boxes.extend_from_slice(entity_collisions);
-    }
+// Entity.collectColliders
+fn collect_colliders(world: &World, entity_collisions: &[VoxelShape], area: &Aabb) -> Vec<VoxelShape> {
+    let mut collision_boxes: Vec<VoxelShape> = Vec::with_capacity(entity_collisions.len() + 1);
+    collision_boxes.extend_from_slice(entity_collisions);
 
     // TODO: world border
 
-    let block_collisions =
-        get_block_collisions(world, &entity_bounding_box.expand_towards(movement));
-    collision_boxes.extend(block_collisions);
-    collide_with_shapes(movement, *entity_bounding_box, &collision_boxes)
+    collision_boxes.extend(get_block_collisions(world, area));
+    collision_boxes
+}
+
+// Entity.collectCandidateStepUpHeights
+fn candidate_step_up_heights(
+    from: &Aabb,
+    colliders: &[VoxelShape],
+    max_up_step: f32,
+    height_to_skip: f32,
+) -> Vec<f32> {
+    let mut heights: Vec<f32> = Vec::with_capacity(4);
+    for shape in colliders {
+        for &y in shape.get_coords(Axis::Y) {
+            let height = (y - from.min.y) as f32;
+            if height < 0. || height == height_to_skip {
+                continue;
+            }
+            if height > max_up_step {
+                break;
+            }
+            if !heights.contains(&height) {
+                heights.push(height);
+            }
+        }
+    }
+    heights.sort_by(f32::total_cmp);
+    heights
 }
 
 fn collide_with_shapes(

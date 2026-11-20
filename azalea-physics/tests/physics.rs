@@ -153,6 +153,56 @@ fn test_collision() {
 }
 
 #[test]
+fn test_landing_beside_block_does_not_step_up() {
+    let mut app = make_test_app();
+    let world_lock = insert_overworld(&mut app);
+    let mut partial_world = PartialWorld::default();
+
+    partial_world.chunks.set(
+        &ChunkPos { x: 0, z: 0 },
+        Some(Chunk::default()),
+        &mut world_lock.write().chunks,
+    );
+    let entity = app
+        .world_mut()
+        .spawn((
+            EntityBundle::new(
+                Uuid::nil(),
+                Vec3 {
+                    x: 0.69,
+                    y: 70.5,
+                    z: 0.5,
+                },
+                EntityKind::Player,
+                WorldName::new("minecraft:overworld"),
+            ),
+            MinecraftEntityId(0),
+            LocalEntity,
+            HasClientLoaded,
+        ))
+        .id();
+    for pos in [BlockPos { x: 0, y: 69, z: 0 }, BlockPos { x: 1, y: 70, z: 0 }] {
+        let block_state =
+            partial_world
+                .chunks
+                .set_block_state(pos, BlockKind::Stone.into(), &world_lock.write().chunks);
+        assert!(block_state.is_some(), "the chunk should be loaded");
+    }
+    // falling onto the floor at 70 while pushing into the full block beside
+    // it: vanilla measures the step from where the fall stopped, so the block
+    // (a whole block above the floor) is never climbed even though the
+    // pre-landing box was within step height of its top
+    app.world_mut().get_mut::<Physics>(entity).unwrap().velocity = Vec3::new(0.05, -0.6, 0.);
+    for _ in 0..5 {
+        app.world_mut().run_schedule(GameTick);
+        app.update();
+    }
+    let entity_pos = *app.world_mut().get::<Position>(entity).unwrap();
+    assert_eq!(entity_pos.y, 70.);
+    assert!(entity_pos.x <= 0.7, "x {} went into the block", entity_pos.x);
+}
+
+#[test]
 fn test_slab_collision() {
     let mut app = make_test_app();
     let world_lock = insert_overworld(&mut app);
