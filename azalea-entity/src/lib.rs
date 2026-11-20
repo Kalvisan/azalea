@@ -419,6 +419,8 @@ impl Attributes {
             entity_interaction_range: AttributeInstance::new(3.0),
             step_height: AttributeInstance::new(0.6),
             block_break_speed: AttributeInstance::new(1.0),
+            safe_fall_distance: AttributeInstance::new(3.0),
+            fall_damage_multiplier: AttributeInstance::new(1.0),
         }
     }
 }

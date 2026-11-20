@@ -27,6 +27,9 @@ pub struct Attributes {
     pub entity_interaction_range: AttributeInstance,
 
     pub step_height: AttributeInstance,
+
+    pub safe_fall_distance: AttributeInstance,
+    pub fall_damage_multiplier: AttributeInstance,
 }
 
 impl Attributes {
@@ -43,6 +46,8 @@ impl Attributes {
             Attribute::EntityInteractionRange => &mut self.entity_interaction_range,
             Attribute::StepHeight => &mut self.step_height,
             Attribute::BlockBreakSpeed => &mut self.block_break_speed,
+            Attribute::SafeFallDistance => &mut self.safe_fall_distance,
+            Attribute::FallDamageMultiplier => &mut self.fall_damage_multiplier,
             _ => return None,
         };
         Some(value)
