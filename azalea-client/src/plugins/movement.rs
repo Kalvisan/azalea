@@ -316,7 +316,7 @@ pub fn local_player_ai_step(
     mut query: Query<
         (
             Entity,
-            &ClientMovementState,
+            &mut ClientMovementState,
             &PlayerAbilities,
             &metadata::Swimming,
             &metadata::SleepingPos,
@@ -338,7 +338,7 @@ pub fn local_player_ai_step(
 ) {
     for (
         entity,
-        physics_state,
+        mut physics_state,
         abilities,
         swimming,
         sleeping_pos,
@@ -393,6 +393,10 @@ pub fn local_player_ai_step(
         // modifier, so the speed follows the flag that decides the sprinting packets
         let flagged_sprinting = **sprinting;
         set_sprinting(flagged_sprinting, &mut sprinting, &mut attributes);
+
+        if std::mem::take(&mut physics_state.stop_sprinting) {
+            set_sprinting(false, &mut sprinting, &mut attributes);
+        }
 
         let trying_to_sprint = physics_state.trying_to_sprint;
 
@@ -651,14 +655,13 @@ pub struct StartWalkEvent {
 /// [`StartWalkEvent`].
 pub fn handle_walk(
     mut events: MessageReader<StartWalkEvent>,
-    mut query: Query<(&mut ClientMovementState, &mut Sprinting, &mut Attributes)>,
+    mut query: Query<&mut ClientMovementState>,
 ) {
     for event in events.read() {
-        if let Ok((mut physics_state, mut sprinting, mut attributes)) = query.get_mut(event.entity)
-        {
+        if let Ok(mut physics_state) = query.get_mut(event.entity) {
             physics_state.move_direction = event.direction;
             physics_state.trying_to_sprint = false;
-            set_sprinting(false, &mut sprinting, &mut attributes);
+            physics_state.stop_sprinting = true;
         }
     }
 }
@@ -681,6 +684,7 @@ pub fn handle_sprint(
         if let Ok(mut physics_state) = query.get_mut(event.entity) {
             physics_state.move_direction = WalkDirection::from(event.direction);
             physics_state.trying_to_sprint = true;
+            physics_state.stop_sprinting = false;
         }
     }
 }

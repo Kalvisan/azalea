@@ -15,6 +15,10 @@ pub struct ClientMovementState {
     // Whether we're going to try to start sprinting this tick. Equivalent to
     // holding down ctrl for a tick.
     pub trying_to_sprint: bool,
+    /// Whether a walk asked to stop sprinting. The stop lands in
+    /// `LocalPlayer.aiStep`, after the tick's swimming state was decided from
+    /// the sprint the tick started with, as a vanilla sprint stop does.
+    pub stop_sprinting: bool,
 
     /// Whether our player is currently trying to sneak.
     ///
