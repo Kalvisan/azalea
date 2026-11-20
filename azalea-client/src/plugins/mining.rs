@@ -1,7 +1,13 @@
 use azalea_block::{BlockState, fluid_state::FluidState};
-use azalea_core::{direction::Direction, game_type::GameMode, position::BlockPos, tick::GameTick};
+use azalea_core::{
+    direction::Direction,
+    game_type::GameMode,
+    position::{BlockPos, Vec3},
+    tick::GameTick,
+};
 use azalea_entity::{
     ActiveEffects, Attributes, FluidOnEyes, Physics, PlayerAbilities, Position,
+    dimensions::EntityDimensions,
     inventory::Inventory, mining::get_mine_progress,
 };
 use azalea_inventory::ItemStack;
@@ -142,6 +148,37 @@ pub struct Mining {
     pub sent_dir: Direction,
 }
 
+/// The face of the block at `pos` that a player with its eyes at `eye` would
+/// hit looking at the block's centre: the face a ray from the eyes to the
+/// centre meets first when nothing is in between, else the face the eyes are
+/// furthest outside of. Never a face the eyes are behind, as anti-cheat checks.
+pub fn face_seen_from(world: &azalea_world::World, eye: Vec3, pos: BlockPos) -> Direction {
+    let hit = azalea_physics::clip::clip(
+        &world.chunks,
+        azalea_physics::clip::ClipContext {
+            from: eye,
+            to: pos.center(),
+            block_shape_type: azalea_physics::clip::BlockShapeType::Outline,
+            fluid_pick_type: azalea_physics::clip::FluidPickType::None,
+        },
+    );
+    if !hit.miss && hit.block_pos == pos {
+        return hit.direction;
+    }
+    let centre = pos.center();
+    [
+        (eye.y - centre.y, Direction::Up),
+        (centre.y - eye.y, Direction::Down),
+        (eye.x - centre.x, Direction::East),
+        (centre.x - eye.x, Direction::West),
+        (eye.z - centre.z, Direction::South),
+        (centre.z - eye.z, Direction::North),
+    ]
+    .into_iter()
+    .max_by(|a, b| a.0.total_cmp(&b.0))
+    .map_or(Direction::Up, |(_, direction)| direction)
+}
+
 /// Start mining the block at the given position.
 ///
 /// If we're looking at the block then the correct direction will be used,
@@ -162,11 +199,11 @@ pub struct StartMiningBlockEvent {
 fn handle_start_mining_block_event(
     mut commands: Commands,
     mut events: MessageReader<StartMiningBlockEvent>,
-    mut query: Query<&HitResultComponent>,
+    mut query: Query<(&HitResultComponent, &Position, &EntityDimensions, &WorldHolder)>,
 ) {
     for event in events.read() {
         trace!("{event:?}");
-        let hit_result = query.get_mut(event.entity).unwrap();
+        let (hit_result, position, dimensions, world_holder) = query.get_mut(event.entity).unwrap();
         if event.force {
             let direction = if let Some(block_hit_result) =
                 hit_result.as_block_hit_result_if_not_miss()
@@ -175,12 +212,13 @@ fn handle_start_mining_block_event(
                 // we're looking at the block
                 block_hit_result.direction
             } else {
+                let eye = position.up(dimensions.eye_height.into());
+                let direction = face_seen_from(&world_holder.shared.read(), eye, event.position);
                 debug!(
-                    "Got StartMiningBlockEvent but we're not looking at the block ({hit_result:?}.block_pos != {:?}). Picking an arbitrary direction instead.",
+                    "Got StartMiningBlockEvent but we're not looking at the block ({hit_result:?}.block_pos != {:?}). Using the face seen from the eyes, {direction:?}.",
                     event.position
                 );
-                // we're not looking at the block, arbitrary direction
-                Direction::Down
+                direction
             };
             commands.entity(event.entity).insert(MiningQueued {
                 position: event.position,
