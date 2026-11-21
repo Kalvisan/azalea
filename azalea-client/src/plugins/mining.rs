@@ -502,7 +502,7 @@ pub struct MineProgress(pub f32);
 impl MineProgress {
     pub fn destroy_stage(&self) -> Option<u32> {
         if self.0 > 0. {
-            Some((self.0 * 10.) as u32)
+            Some(((self.0 * 10.) as u32).min(9))
         } else {
             None
         }
@@ -717,7 +717,7 @@ pub fn continue_mining_block(
                 continue;
             }
             let block = target_block_state.to_trait();
-            **mine_progress += get_mine_progress(
+            let step = get_mine_progress(
                 block,
                 current_mining_item,
                 fluid_on_eyes,
@@ -725,13 +725,16 @@ pub fn continue_mining_block(
                 attributes,
                 active_effects,
             );
+            **mine_progress += step;
 
             if **mine_ticks % 4. == 0. {
                 // vanilla makes a mining sound here
             }
             **mine_ticks += 1.;
 
-            if **mine_progress >= 1. {
+            // The break is sent one tick after the progress reaches 1: a break sent on that very tick takes
+            // exactly the time anti-cheat predicts, so network jitter alone can make it look a tick early.
+            if **mine_progress - step >= 1. {
                 // MiningQueued is removed in case we were doing an infinite
                 // loop that repeatedly inserts MiningQueued
                 commands.entity(entity).remove::<(Mining, MiningQueued)>();
