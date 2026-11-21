@@ -5,7 +5,7 @@ use azalea_core::{
 };
 use azalea_entity::{
     Attributes, HasClientLoaded, Jumping, LoadedBelow, LocalEntity, LookDirection, OnClimbable,
-    Physics, PlayerAbilities, Pose, Position,
+    Physics, PlayerAbilities, Position,
     metadata::{FallFlying, Sprinting, Swimming},
     move_relative, view_vector,
 };
@@ -37,7 +37,6 @@ pub fn travel(
             Option<&ClientMovementState>,
             Option<&Sprinting>,
             Option<&Swimming>,
-            Option<&Pose>,
             Option<&PlayerAbilities>,
             &mut Physics,
             &mut LookDirection,
@@ -60,7 +59,6 @@ pub fn travel(
         physics_state,
         sprinting,
         swimming,
-        pose,
         abilities,
         mut physics,
         direction,
@@ -96,7 +94,6 @@ pub fn travel(
             direction: *direction,
             sprinting,
             on_climbable: *on_climbable,
-            pose: pose.copied(),
             jumping: *jumping,
         };
 

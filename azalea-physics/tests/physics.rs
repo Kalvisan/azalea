@@ -6,12 +6,13 @@ use azalea_block::{
 };
 use azalea_core::{
     entity_id::MinecraftEntityId,
+    game_type::GameMode,
     position::{BlockPos, ChunkPos, Vec3},
     registry_holder::RegistryHolder,
     tick::GameTick,
 };
 use azalea_entity::{EntityBundle, EntityPlugin, HasClientLoaded, LocalEntity, Physics, Position};
-use azalea_physics::PhysicsPlugin;
+use azalea_physics::{PhysicsPlugin, client_movement::ClientMovementState};
 use azalea_registry::builtin::{BlockKind, EntityKind};
 use azalea_world::{Chunk, PartialWorld, World, WorldName, Worlds};
 use bevy_app::App;
@@ -200,6 +201,65 @@ fn test_landing_beside_block_does_not_step_up() {
     let entity_pos = *app.world_mut().get::<Position>(entity).unwrap();
     assert_eq!(entity_pos.y, 70.);
     assert!(entity_pos.x <= 0.7, "x {} went into the block", entity_pos.x);
+}
+
+#[test]
+fn test_shift_holds_ladder_on_the_tick_it_is_pressed() {
+    let mut app = make_test_app();
+    let world_lock = insert_overworld(&mut app);
+    let mut partial_world = PartialWorld::default();
+
+    partial_world.chunks.set(
+        &ChunkPos { x: 0, z: 0 },
+        Some(Chunk::default()),
+        &mut world_lock.write().chunks,
+    );
+    let entity = app
+        .world_mut()
+        .spawn((
+            EntityBundle::new(
+                Uuid::nil(),
+                Vec3 {
+                    x: 0.5,
+                    y: 70.5,
+                    z: 0.5,
+                },
+                EntityKind::Player,
+                WorldName::new("minecraft:overworld"),
+            ),
+            MinecraftEntityId(0),
+            LocalEntity,
+            HasClientLoaded,
+            GameMode::Survival,
+            ClientMovementState {
+                trying_to_crouch: true,
+                ..Default::default()
+            },
+        ))
+        .id();
+    let blocks = [
+        (BlockPos { x: 0, y: 69, z: 0 }, BlockKind::Stone),
+        (BlockPos { x: 0, y: 70, z: 0 }, BlockKind::Ladder),
+        (BlockPos { x: 0, y: 71, z: 0 }, BlockKind::Ladder),
+    ];
+    for (pos, kind) in blocks {
+        let block_state = partial_world
+            .chunks
+            .set_block_state(pos, kind.into(), &world_lock.write().chunks);
+        assert!(block_state.is_some(), "the chunk should be loaded");
+    }
+    // a first tick finds the ladder at the feet
+    app.world_mut().run_schedule(GameTick);
+    app.update();
+    let held_at = app.world_mut().get::<Position>(entity).unwrap().y;
+    // sliding down a ladder with shift held: vanilla's
+    // Player.isSuppressingSlidingDownLadder reads the shift key of this tick,
+    // so the slide stops at once, before the pose turns to crouching
+    app.world_mut().get_mut::<Physics>(entity).unwrap().velocity = Vec3::new(0., -0.3, 0.);
+    app.world_mut().run_schedule(GameTick);
+    app.update();
+    let entity_pos = *app.world_mut().get::<Position>(entity).unwrap();
+    assert_eq!(entity_pos.y, held_at);
 }
 
 #[test]

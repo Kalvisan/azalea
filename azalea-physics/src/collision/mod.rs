@@ -16,7 +16,7 @@ use azalea_core::{
     position::{BlockPos, Vec3},
 };
 use azalea_entity::{
-    Attributes, Jumping, LookDirection, OnClimbable, Physics, PlayerAbilities, Pose, Position,
+    Attributes, Jumping, LookDirection, OnClimbable, Physics, PlayerAbilities, Position,
     metadata::Sprinting,
 };
 use azalea_registry::builtin::BlockKind;
@@ -119,7 +119,6 @@ pub struct MoveCtx<'world, 'state, 'a, 'b> {
     pub direction: LookDirection,
     pub sprinting: Sprinting,
     pub on_climbable: OnClimbable,
-    pub pose: Option<Pose>,
     pub jumping: Jumping,
 }
 

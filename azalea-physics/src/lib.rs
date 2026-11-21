@@ -17,7 +17,7 @@ use azalea_core::{
 };
 use azalea_entity::{
     ActiveEffects, Attributes, EntityKindComponent, HasClientLoaded, Jumping, LocalEntity,
-    LookDirection, OnClimbable, Physics, Pose, Position, dimensions::EntityDimensions,
+    LookDirection, OnClimbable, Physics, Position, dimensions::EntityDimensions,
     metadata::Sprinting, move_relative,
 };
 use azalea_registry::builtin::{BlockKind, EntityKind, MobEffect};
@@ -413,12 +413,16 @@ fn handle_relative_friction_and_calculate_movement(ctx: &mut MoveCtx, block_fric
         ),
     );
 
+    // Player.isSuppressingSlidingDownLadder: the shift key held this tick,
+    // not the crouching pose, which follows it a tick later
+    let suppressing_slide = ctx.physics_state.is_some_and(|s| s.trying_to_crouch)
+        && !ctx.abilities.is_some_and(|a| a.flying);
     ctx.physics.velocity = handle_on_climbable(
         ctx.physics.velocity,
         ctx.on_climbable,
         *ctx.position,
         ctx.world,
-        ctx.pose,
+        suppressing_slide,
     );
 
     move_colliding(ctx, ctx.physics.velocity);
@@ -445,7 +449,7 @@ fn handle_on_climbable(
     on_climbable: OnClimbable,
     position: Position,
     world: &World,
-    pose: Option<Pose>,
+    suppressing_slide: bool,
 ) -> Vec3 {
     if !*on_climbable {
         return velocity;
@@ -461,7 +465,7 @@ fn handle_on_climbable(
 
     // sneaking on ladders/vines
     if y < 0.0
-        && pose == Some(Pose::Crouching)
+        && suppressing_slide
         && BlockKind::from(
             world
                 .chunks
