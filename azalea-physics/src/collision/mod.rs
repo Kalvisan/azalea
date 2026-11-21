@@ -522,10 +522,8 @@ pub fn legacy_calculate_solid(block: BlockState) -> bool {
         return solid;
     }
 
-    let shape = block.base_collision_shape();
-    if shape.is_empty() {
+    let Some(bounds) = block.base_collision_shape().bounds() else {
         return false;
-    }
-    let bounds = shape.bounds();
+    };
     bounds.size() >= 0.7291666666666666 || bounds.get_size(Axis::Y) >= 1.0
 }

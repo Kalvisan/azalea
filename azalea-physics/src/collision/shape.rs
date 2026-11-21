@@ -546,12 +546,16 @@ impl VoxelShape {
         aabbs
     }
 
-    pub fn bounds(&self) -> Aabb {
-        assert!(!self.is_empty(), "Can't get bounds for empty shape");
-        Aabb {
+    /// The smallest box holding the whole shape, or `None` for an empty shape (air, or a block with no outline), which
+    /// vanilla's `VoxelShape.bounds` refuses with an exception.
+    pub fn bounds(&self) -> Option<Aabb> {
+        if self.is_empty() {
+            return None;
+        }
+        Some(Aabb {
             min: Vec3::new(self.min(Axis::X), self.min(Axis::Y), self.min(Axis::Z)),
             max: Vec3::new(self.max(Axis::X), self.max(Axis::Y), self.max(Axis::Z)),
-        }
+        })
     }
 }
 
@@ -743,6 +747,17 @@ mod tests {
         assert_eq!(shape.get_coords(Axis::X).len(), 2);
         assert_eq!(shape.get_coords(Axis::Y).len(), 2);
         assert_eq!(shape.get_coords(Axis::Z).len(), 2);
+    }
+
+    #[test]
+    fn test_bounds_of_empty_shape() {
+        use crate::collision::BlockWithShape;
+
+        assert_eq!(EMPTY_SHAPE.bounds(), None);
+        // an outline of air, as a crosshair on a block broken a tick ago reads it
+        assert_eq!(azalea_block::BlockState::AIR.outline_shape(azalea_core::position::BlockPos::ZERO).bounds(), None);
+        let slab = box_shape(0., 0., 0., 1., 0.5, 1.).bounds().unwrap();
+        assert_eq!(slab.max, Vec3::new(1., 0.5, 1.));
     }
 
     #[test]
