@@ -38,7 +38,10 @@ use crate::{
     disconnect::DisconnectEvent,
     interact::BlockStatePredictionHandler,
     inventory::{ClientsideCloseContainerEvent, MenuOpenedEvent, SetContainerContentEvent},
-    local_player::{Experience, Hunger, PreviousGameMode, TabList, TabListResource, WorldHolder},
+    local_player::{
+        Experience, Hunger, PreviousGameMode, RecipePropertySets, TabList, TabListResource,
+        WorldHolder,
+    },
     movement::{KnockbackData, KnockbackEvent},
     packet::{
         as_system, declare_packet_handlers,
@@ -412,8 +415,15 @@ impl GamePacketHandler<'_> {
         });
     }
 
-    pub fn update_recipes(&mut self, _p: &ClientboundUpdateRecipes) {
+    pub fn update_recipes(&mut self, p: &ClientboundUpdateRecipes) {
         debug!("Got update recipes packet");
+
+        let sets = p.item_sets.iter().map(|(name, set)| (name.clone(), set.items.clone()));
+        as_system::<Commands>(self.ecs, |mut commands| {
+            commands
+                .entity(self.player)
+                .insert(RecipePropertySets(sets.collect()));
+        });
     }
 
     pub fn entity_event(&mut self, _p: &ClientboundEntityEvent) {

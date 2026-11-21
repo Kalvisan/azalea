@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use azalea_core::game_type::GameMode;
+use azalea_registry::{builtin::ItemKind, identifier::Identifier};
 use azalea_world::{PartialWorld, World};
 use bevy_ecs::{component::Component, prelude::*};
 use derive_more::{Deref, DerefMut};
@@ -81,6 +82,17 @@ impl From<TabList> for TabListResource {
 impl From<TabListResource> for TabList {
     fn from(t: TabListResource) -> Self {
         TabList(t.0)
+    }
+}
+
+/// The recipe property sets from the server's `ClientboundUpdateRecipes`, such as `minecraft:campfire_input`: the
+/// items vanilla's client checks against a recipe group without knowing the recipes.
+#[derive(Clone, Component, Debug, Default)]
+pub struct RecipePropertySets(pub HashMap<Identifier, Vec<ItemKind>>);
+impl RecipePropertySets {
+    /// Whether the set named `set` holds `item`; false for a set the server did not send.
+    pub fn contains(&self, set: &str, item: ItemKind) -> bool {
+        self.0.get(&Identifier::new(set)).is_some_and(|items| items.contains(&item))
     }
 }
 

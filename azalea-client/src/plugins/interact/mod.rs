@@ -1,4 +1,5 @@
 pub mod pick;
+pub mod use_on;
 
 use std::collections::HashMap;
 
@@ -21,7 +22,7 @@ use azalea_entity::{
     indexing::EntityIdIndex,
     inventory::Inventory,
 };
-use azalea_inventory::{ItemStack, ItemStackData, components};
+use azalea_inventory::{ItemStack, ItemStackData, components, components::EquipmentSlot};
 use azalea_physics::{
     PhysicsSystems,
     client_movement::ClientMovementState,
@@ -41,7 +42,7 @@ use crate::{
     attack::handle_attack_event,
     interact::pick::{HitResultComponent, update_hit_result_component},
     inventory::InventorySystems,
-    local_player::PermissionLevel,
+    local_player::{Hunger, PermissionLevel, RecipePropertySets, WorldHolder},
     movement::MoveEventsSystems,
     packet::game::SendGamePacketEvent,
     respawn::perform_respawn,
@@ -229,6 +230,51 @@ pub struct StartUseItemQueued {
     /// it, but should be avoided to stay compatible with anticheats.
     pub force_block: Option<BlockPos>,
 }
+/// What [`handle_start_use_item_queued`] reads to tell whether a click on a
+/// block goes on to a [`ServerboundUseItem`].
+#[derive(bevy_ecs::query::QueryData)]
+pub struct UseItemOnState {
+    inventory: &'static Inventory,
+    game_mode: &'static GameMode,
+    movement: &'static ClientMovementState,
+    hunger: Option<&'static Hunger>,
+    recipe_sets: Option<&'static RecipePropertySets>,
+    abilities: &'static PlayerAbilities,
+    permission_level: &'static PermissionLevel,
+    world: &'static WorldHolder,
+}
+impl UseItemOnStateItem<'_, '_> {
+    /// Whether vanilla's client sends a [`ServerboundUseItem`] after the
+    /// [`ServerboundUseItemOn`] for a click on `hit` with `hand`; see
+    /// [`use_on::item_use_follows`].
+    fn item_use_follows(&self, hit: &BlockHitResult, hand: InteractionHand) -> bool {
+        let (slot, other_slot) = match hand {
+            InteractionHand::MainHand => (EquipmentSlot::Mainhand, EquipmentSlot::Offhand),
+            InteractionHand::OffHand => (EquipmentSlot::Offhand, EquipmentSlot::Mainhand),
+        };
+        let (Some(item), Some(other_item)) = (
+            self.inventory.get_equipment(slot),
+            self.inventory.get_equipment(other_slot),
+        ) else {
+            return false;
+        };
+        let Some(block) = self.world.shared.read().get_block_state(hit.block_pos) else {
+            return false;
+        };
+        let ctx = use_on::UseOnContext {
+            hand,
+            item,
+            other_item,
+            secondary: self.movement.trying_to_crouch,
+            game_mode: *self.game_mode,
+            game_master: can_use_game_master_blocks(self.abilities, self.permission_level),
+            food: self.hunger.map_or(20, |hunger| hunger.food),
+            recipe_sets: self.recipe_sets,
+        };
+        use_on::item_use_follows(block, hit, &ctx)
+    }
+}
+
 #[allow(clippy::type_complexity)]
 pub fn handle_start_use_item_queued(
     mut commands: Commands,
@@ -239,10 +285,18 @@ pub fn handle_start_use_item_queued(
         &HitResultComponent,
         &LookDirection,
         Option<&Mining>,
+        UseItemOnState,
     )>,
 ) {
-    for (entity, start_use_item, mut prediction_handler, hit_result, look_direction, mining) in
-        query
+    for (
+        entity,
+        start_use_item,
+        mut prediction_handler,
+        hit_result,
+        look_direction,
+        mining,
+        use_on_state,
+    ) in query
     {
         commands.entity(entity).remove::<StartUseItemQueued>();
 
@@ -297,10 +351,21 @@ pub fn handle_start_use_item_queued(
                             seq,
                         },
                     ));
+                    // Minecraft.startUseItem: a click that neither the block nor
+                    // the item's useOn takes goes on to useItem in the same tick
+                    if use_on_state.item_use_follows(r, start_use_item.hand) {
+                        commands.trigger(SendGamePacketEvent::new(
+                            entity,
+                            ServerboundUseItem {
+                                hand: start_use_item.hand,
+                                seq: prediction_handler.start_predicting(),
+                                x_rot: look_direction.x_rot(),
+                                y_rot: look_direction.y_rot(),
+                            },
+                        ));
+                    }
                     // TODO: depending on the result of useItemOn, this might
                     // also need to send a SwingArmEvent.
-                    // basically, this TODO is for simulating block
-                    // interactions/placements on the client-side.
                 }
             }
             HitResult::Entity(r) => {
