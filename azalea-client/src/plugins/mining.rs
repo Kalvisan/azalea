@@ -146,6 +146,15 @@ pub struct Mining {
     /// The face last sent to the server for this dig, so a change of the
     /// face mid-dig is sent as vanilla's `ChangeDestroyDirection`.
     pub sent_dir: Direction,
+    /// When the dig's `StartDestroyBlock` was sent. The break waits until the
+    /// wall-clock time since then covers the ticks the dig took at 50 ms each,
+    /// so ticks run quickly to catch up after a stall cannot finish a dig
+    /// sooner than the server's clock allows.
+    pub started: std::time::Instant,
+    /// The ticks the dig had taken on the first tick it was ready to break,
+    /// whose 50 ms each the break waits for; fixed then, so waiting ticks do
+    /// not move it.
+    pub ripe_ticks: Option<f32>,
 }
 
 /// The face of the block at `pos` that a player with its eyes at `eye` would
@@ -406,6 +415,8 @@ pub fn handle_mining_queued(
                     dir: mining_queued.direction,
                     force: mining_queued.force,
                     sent_dir: mining_queued.direction,
+                    started: std::time::Instant::now(),
+                    ripe_ticks: None,
                 };
                 trace!("inserting mining component {mining:?} for entity {entity:?}");
                 commands.entity(entity).insert((mining, MineStarted));
@@ -725,6 +736,7 @@ pub fn continue_mining_block(
                 attributes,
                 active_effects,
             );
+            let ripe = **mine_progress >= 1.;
             **mine_progress += step;
 
             if **mine_ticks % 4. == 0. {
@@ -734,7 +746,13 @@ pub fn continue_mining_block(
 
             // The break is sent one tick after the progress reaches 1: a break sent on that very tick takes
             // exactly the time anti-cheat predicts, so network jitter alone can make it look a tick early.
-            if **mine_progress - step >= 1. {
+            if ripe && mining.ripe_ticks.is_none() {
+                mining.ripe_ticks = Some(**mine_ticks);
+            }
+            let paced = mining
+                .ripe_ticks
+                .is_some_and(|ticks| mining.started.elapsed().as_secs_f32() >= ticks * 0.05);
+            if ripe && paced {
                 // MiningQueued is removed in case we were doing an infinite
                 // loop that repeatedly inserts MiningQueued
                 commands.entity(entity).remove::<(Mining, MiningQueued)>();
