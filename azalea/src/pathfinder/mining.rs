@@ -4,7 +4,10 @@ use azalea_block::{
     BlockState, BlockStates, block_state::BlockStateIntegerRepr, properties::Waterlogged,
 };
 use azalea_inventory::Menu;
-use azalea_registry::builtin::BlockKind;
+use azalea_registry::{
+    builtin::BlockKind,
+    tags::blocks::{BEDS, SHULKER_BOXES},
+};
 use nohash_hasher::IntMap;
 
 use super::costs::BLOCK_BREAK_ADDITIONAL_PENALTY;
@@ -81,6 +84,9 @@ impl MiningCache {
         let Some(inventory_menu) = &self.inventory_menu else {
             return f32::INFINITY;
         };
+        if is_kept(BlockKind::from(block)) {
+            return f32::INFINITY;
+        }
 
         // SAFETY: mining is single-threaded, so this is safe
         let block_state_id_costs = unsafe { &mut *self.block_state_id_costs.get() };
@@ -116,4 +122,23 @@ impl MiningCache {
 
 pub fn is_waterlogged(block: BlockState) -> bool {
     block.property::<Waterlogged>().unwrap_or_default()
+}
+
+/// Whether a path never mines a block of this kind: a container, a station or
+/// a bed a player placed and uses, which a walk breaking it in passing would
+/// lose with its contents. Doors, trapdoors and fence gates stay minable here
+/// as before, since a walk opens them rather than mining them.
+fn is_kept(kind: BlockKind) -> bool {
+    matches!(
+        kind,
+        BlockKind::Chest
+            | BlockKind::TrappedChest
+            | BlockKind::Barrel
+            | BlockKind::EnderChest
+            | BlockKind::CraftingTable
+            | BlockKind::Furnace
+            | BlockKind::BlastFurnace
+            | BlockKind::Smoker
+    ) || BEDS.contains(&kind)
+        || SHULKER_BOXES.contains(&kind)
 }
