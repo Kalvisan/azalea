@@ -274,12 +274,11 @@ impl Client {
         &self,
         predicate: impl EntityPredicate<Q, F>,
     ) -> AzaleaResult<Box<[Entity]>> {
-        let (world_name, position) = {
-            let world_name = self.component::<WorldName>()?;
-            let position = self.component::<Position>()?;
-
-            (world_name.clone(), **position)
-        };
+        // Each read guard is dropped before the next is taken: parking_lot's
+        // RwLock blocks a second read on the same thread while the tick
+        // thread waits to write, which deadlocks the client.
+        let world_name = self.component::<WorldName>()?.clone();
+        let position = **self.component::<Position>()?;
 
         Ok(predicate.find_all_sorted(self.ecs.clone(), &world_name, position))
     }
