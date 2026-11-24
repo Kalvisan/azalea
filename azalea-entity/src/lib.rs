@@ -287,6 +287,15 @@ pub struct Physics {
     on_ground: bool,
     last_on_ground: bool,
 
+    /// The block the entity stood on after its last move
+    /// (`Entity.mainSupportingBlockPos`): of the blocks under its feet, the one
+    /// whose centre is nearest its position. Friction, the jump factor and fall
+    /// effects read this block, not the one under the position.
+    pub main_supporting_block_pos: Option<BlockPos>,
+    /// Whether the entity was on the ground with no block under its feet at
+    /// the last supporting block check (`Entity.onGroundNoBlocks`).
+    pub on_ground_no_blocks: bool,
+
     /// The number of ticks until we jump again, if the jump key is being held.
     ///
     /// This must be 0 for us to be able to jump. Sets to 10 when we do a jump
@@ -334,6 +343,8 @@ impl Physics {
 
             on_ground: false,
             last_on_ground: false,
+            main_supporting_block_pos: None,
+            on_ground_no_blocks: false,
 
             no_jump_delay: 0,
 
