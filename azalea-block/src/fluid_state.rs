@@ -15,11 +15,8 @@ pub struct FluidState {
     /// the two representations with [`to_or_from_legacy_fluid_level`].
     pub amount: u8,
 
-    /// Whether this fluid is at the max level and there's another fluid of the
-    /// same type above it.
-    ///
-    /// TODO: this is currently unused (always false), make this actually get
-    /// set (see FlowingFluid.getFlowing)
+    /// Whether this is falling fluid, which a liquid block's level of 8 or more
+    /// holds (`FlowingFluid.FALLING`).
     pub falling: bool,
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -36,6 +33,32 @@ impl FluidState {
             amount: 8,
             falling,
         }
+    }
+
+    /// `LiquidBlock.getFluidState`: level 0 is a source, 1 to 7 flowing fluid
+    /// of amount 8 minus the level, and 8 or more falling fluid of amount 8.
+    pub fn from_liquid_level(kind: FluidKind, level: u8) -> Self {
+        if level >= 8 {
+            return Self {
+                kind,
+                amount: 8,
+                falling: true,
+            };
+        }
+        Self {
+            kind,
+            amount: to_or_from_legacy_fluid_level(level),
+            falling: false,
+        }
+    }
+
+    /// The liquid block level that holds this fluid, the inverse of
+    /// [`Self::from_liquid_level`].
+    pub fn liquid_level(&self) -> u8 {
+        if self.falling {
+            return 8;
+        }
+        to_or_from_legacy_fluid_level(self.amount)
     }
 
     /// A floating point number in between 0 and 1 representing the height (as a
@@ -88,21 +111,13 @@ impl From<BlockState> for FluidState {
                 let level = state
                     .property::<crate::properties::WaterLevel>()
                     .expect("water block should always have WaterLevel");
-                return Self {
-                    kind: FluidKind::Water,
-                    amount: to_or_from_legacy_fluid_level(level as u8),
-                    falling: false,
-                };
+                return Self::from_liquid_level(FluidKind::Water, level as u8);
             }
             BlockKind::Lava => {
                 let level = state
                     .property::<crate::properties::LavaLevel>()
                     .expect("lava block should always have LavaLevel");
-                return Self {
-                    kind: FluidKind::Lava,
-                    amount: to_or_from_legacy_fluid_level(level as u8),
-                    falling: false,
-                };
+                return Self::from_liquid_level(FluidKind::Lava, level as u8);
             }
             BlockKind::BubbleColumn
             | BlockKind::Seagrass
@@ -134,10 +149,14 @@ impl From<FluidState> for BlockState {
         match state.kind {
             FluidKind::Empty => BlockState::AIR,
             FluidKind::Water => BlockState::from(crate::blocks::Water {
-                level: crate::properties::WaterLevel::from(state.amount as BlockStateIntegerRepr),
+                level: crate::properties::WaterLevel::from(
+                    state.liquid_level() as BlockStateIntegerRepr
+                ),
             }),
             FluidKind::Lava => BlockState::from(crate::blocks::Lava {
-                level: crate::properties::LavaLevel::from(state.amount as BlockStateIntegerRepr),
+                level: crate::properties::LavaLevel::from(
+                    state.liquid_level() as BlockStateIntegerRepr
+                ),
             }),
         }
     }
