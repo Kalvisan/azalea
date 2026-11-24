@@ -20,7 +20,10 @@ use azalea_entity::{
     LookDirection, OnClimbable, Physics, Position, dimensions::EntityDimensions,
     metadata::Sprinting, move_relative,
 };
-use azalea_registry::builtin::{BlockKind, EntityKind, MobEffect};
+use azalea_registry::{
+    builtin::{BlockKind, EntityKind, MobEffect},
+    tags,
+};
 use azalea_world::{World, WorldName, Worlds};
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
@@ -361,7 +364,7 @@ pub fn jump_from_ground(
         .expect("All entities should be in a valid world");
     let world = world_lock.read();
 
-    let base_jump = jump_power(&world, position);
+    let base_jump = jump_power(physics, &world, position);
     let jump_power = base_jump + jump_boost_power(active_effects);
     if jump_power <= 1.0E-5 {
         return;
@@ -392,6 +395,48 @@ pub fn update_old_position(mut query: Query<(&mut Physics, &Position)>) {
     }
 }
 
+/// `Entity.getOnPos(offset)`: the block the entity stands on. With a main
+/// supporting block that is its column at `offset` below the feet, or the
+/// supporting block itself where that is a fence, wall or fence gate the
+/// offset would miss; without one, the block `offset` below the position.
+pub fn on_pos(physics: &Physics, world: &World, position: Position, offset: f32) -> BlockPos {
+    let Some(support) = physics.main_supporting_block_pos else {
+        return BlockPos::new(
+            position.x.floor() as i32,
+            (position.y - offset as f64).floor() as i32,
+            position.z.floor() as i32,
+        );
+    };
+    if offset <= 1.0e-5 {
+        return support;
+    }
+    let kind = BlockKind::from(world.chunks.get_block_state(support).unwrap_or_default());
+    let keeps_support = (offset <= 0.5 && tags::blocks::FENCES.contains(&kind))
+        || tags::blocks::WALLS.contains(&kind)
+        || tags::blocks::FENCE_GATES.contains(&kind);
+    if keeps_support {
+        return support;
+    }
+    BlockPos::new(
+        support.x,
+        (position.y - offset as f64).floor() as i32,
+        support.z,
+    )
+}
+
+/// `Entity.getBlockPosBelowThatAffectsMyMovement`: the block whose friction,
+/// speed and jump factors apply to the entity.
+pub fn block_pos_below_that_affects_movement(
+    physics: &Physics,
+    world: &World,
+    position: Position,
+) -> BlockPos {
+    on_pos(physics, world, position, 0.500001)
+}
+
+/// The block under the position that affects movement, ignoring the main
+/// supporting block; [`block_pos_below_that_affects_movement`] is what vanilla
+/// uses.
 pub fn get_block_pos_below_that_affects_movement(position: Position) -> BlockPos {
     BlockPos::new(
         position.x.floor() as i32,
@@ -500,11 +545,13 @@ fn get_friction_influenced_speed(
 
 /// Returns the what the entity's jump should be multiplied by based on the
 /// block they're standing on.
-fn block_jump_factor(world: &World, position: Position) -> f32 {
+fn block_jump_factor(physics: &Physics, world: &World, position: Position) -> f32 {
     let block_at_pos = world.chunks.get_block_state(position.into());
     let block_below = world
         .chunks
-        .get_block_state(get_block_pos_below_that_affects_movement(position));
+        .get_block_state(block_pos_below_that_affects_movement(
+            physics, world, position,
+        ));
 
     let block_at_pos_jump_factor = if let Some(block) = block_at_pos {
         block.behavior().jump_factor
@@ -528,8 +575,8 @@ fn block_jump_factor(world: &World, position: Position) -> f32 {
 // public double getJumpBoostPower() {
 //     return this.hasEffect(MobEffects.JUMP) ? (double)(0.1F *
 // (float)(this.getEffect(MobEffects.JUMP).getAmplifier() + 1)) : 0.0D; }
-fn jump_power(world: &World, position: Position) -> f32 {
-    0.42 * block_jump_factor(world, position)
+fn jump_power(physics: &Physics, world: &World, position: Position) -> f32 {
+    0.42 * block_jump_factor(physics, world, position)
 }
 
 fn jump_boost_power(active_effects: &ActiveEffects) -> f32 {

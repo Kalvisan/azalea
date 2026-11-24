@@ -81,12 +81,8 @@ fn collide(ctx: &MoveCtx, movement: Vec3) -> Vec3 {
             step_space = step_space.expand_towards(Vec3::new(0., -1.0E-5_f32 as f64, 0.));
         }
         let colliders = collect_colliders(world, &entity_collisions, &step_space);
-        let heights = candidate_step_up_heights(
-            &step_from,
-            &colliders,
-            max_up_step,
-            collided_delta.y as f32,
-        );
+        let heights =
+            candidate_step_up_heights(&step_from, &colliders, max_up_step, collided_delta.y as f32);
         for height in heights {
             let stepped = collide_with_shapes(
                 Vec3::new(movement.x, height as f64, movement.z),
@@ -179,10 +175,11 @@ pub fn move_colliding(ctx: &mut MoveCtx, mut movement: Vec3) {
     physics.vertical_collision = vertical_collision;
     let on_ground = vertical_collision && movement.y < 0.;
     physics.set_on_ground(on_ground);
+    check_supporting_block(physics, world, ***position, Some(collide_result));
 
     // TODO: minecraft checks for a "minor" horizontal collision here
 
-    let block_pos_below = azalea_entity::on_pos_legacy(&world.chunks, **position);
+    let block_pos_below = crate::on_pos(physics, world, **position, 0.2);
     let block_state_below = world.get_block_state(block_pos_below).unwrap_or_default();
 
     check_fall_damage(
@@ -384,7 +381,11 @@ fn collide_bounding_box(
 }
 
 // Entity.collectColliders
-fn collect_colliders(world: &World, entity_collisions: &[VoxelShape], area: &Aabb) -> Vec<VoxelShape> {
+fn collect_colliders(
+    world: &World,
+    entity_collisions: &[VoxelShape],
+    area: &Aabb,
+) -> Vec<VoxelShape> {
     let mut collision_boxes: Vec<VoxelShape> = Vec::with_capacity(entity_collisions.len() + 1);
     collision_boxes.extend_from_slice(entity_collisions);
 
@@ -526,4 +527,92 @@ pub fn legacy_calculate_solid(block: BlockState) -> bool {
         return false;
     };
     bounds.size() >= 0.7291666666666666 || bounds.get_size(Axis::Y) >= 1.0
+}
+
+/// `Entity.checkSupportingBlock`: after a move, finds the block the entity
+/// stands on and keeps it in [`Physics::main_supporting_block_pos`]. When none
+/// is under the feet, the block under where the move started counts instead,
+/// once.
+pub fn check_supporting_block(
+    physics: &mut Physics,
+    world: &World,
+    position: Vec3,
+    movement: Option<Vec3>,
+) {
+    if !physics.on_ground() {
+        physics.on_ground_no_blocks = false;
+        physics.main_supporting_block_pos = None;
+        return;
+    }
+    let bounding_box = physics.bounding_box;
+    let test_area = Aabb {
+        min: Vec3::new(
+            bounding_box.min.x,
+            bounding_box.min.y - 1.0e-6,
+            bounding_box.min.z,
+        ),
+        max: Vec3::new(bounding_box.max.x, bounding_box.min.y, bounding_box.max.z),
+    };
+    let mut supporting_block = find_supporting_block(world, position, &test_area);
+    if supporting_block.is_some() || physics.on_ground_no_blocks {
+        physics.main_supporting_block_pos = supporting_block;
+    } else if let Some(movement) = movement {
+        let moved_back = Aabb {
+            min: test_area.min - Vec3::new(movement.x, 0., movement.z),
+            max: test_area.max - Vec3::new(movement.x, 0., movement.z),
+        };
+        supporting_block = find_supporting_block(world, position, &moved_back);
+        physics.main_supporting_block_pos = supporting_block;
+    }
+    physics.on_ground_no_blocks = supporting_block.is_none();
+}
+
+/// `CollisionGetter.findSupportingBlock`: of the blocks whose collision shape
+/// meets `area`, the one whose centre is nearest `position`, ties going to
+/// the greatest position in y, then z, then x order.
+pub fn find_supporting_block(world: &World, position: Vec3, area: &Aabb) -> Option<BlockPos> {
+    let area_shape = VoxelShape::from(area);
+    let min = BlockPos::new(
+        (area.min.x - EPSILON).floor() as i32 - 1,
+        (area.min.y - EPSILON).floor() as i32 - 1,
+        (area.min.z - EPSILON).floor() as i32 - 1,
+    );
+    let max = BlockPos::new(
+        (area.max.x + EPSILON).floor() as i32 + 1,
+        (area.max.y + EPSILON).floor() as i32 + 1,
+        (area.max.z + EPSILON).floor() as i32 + 1,
+    );
+    let mut best: Option<(BlockPos, f64)> = None;
+    for y in min.y..=max.y {
+        for z in min.z..=max.z {
+            for x in min.x..=max.x {
+                let pos = BlockPos::new(x, y, z);
+                let Some(state) = world.chunks.get_block_state(pos) else {
+                    continue;
+                };
+                if state.is_air() {
+                    continue;
+                }
+                let shape = state
+                    .collision_shape(pos)
+                    .move_relative(pos.to_vec3_floored());
+                if !Shapes::matches_anywhere(&shape, &area_shape, |a, b| a && b) {
+                    continue;
+                }
+                let distance = (pos.center() - position).length_squared();
+                let better = match best {
+                    None => true,
+                    Some((best_pos, best_distance)) => {
+                        distance < best_distance
+                            || (distance == best_distance
+                                && (best_pos.y, best_pos.z, best_pos.x) < (pos.y, pos.z, pos.x))
+                    }
+                };
+                if better {
+                    best = Some((pos, distance));
+                }
+            }
+        }
+    }
+    best.map(|(pos, _)| pos)
 }

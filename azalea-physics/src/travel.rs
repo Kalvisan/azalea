@@ -13,6 +13,7 @@ use azalea_world::{World, WorldName, Worlds};
 use bevy_ecs::prelude::*;
 
 use crate::{
+    block_pos_below_that_affects_movement,
     client_movement::ClientMovementState,
     collision::{
         MoveCtx, MoverType, Shapes,
@@ -20,7 +21,7 @@ use crate::{
         move_colliding,
         world_collisions::{get_block_and_liquid_collisions, get_block_collisions},
     },
-    get_block_pos_below_that_affects_movement, handle_relative_friction_and_calculate_movement,
+    handle_relative_friction_and_calculate_movement,
 };
 
 /// Move the entity with the given acceleration while handling friction,
@@ -139,7 +140,8 @@ fn swim_towards_look(
 fn travel_in_air(ctx: &mut MoveCtx, loaded_below: Option<LoadedBelow>) {
     let gravity = get_effective_gravity();
 
-    let block_pos_below = get_block_pos_below_that_affects_movement(*ctx.position);
+    let block_pos_below =
+        block_pos_below_that_affects_movement(ctx.physics, ctx.world, *ctx.position);
 
     let block_below = ctx
         .world
