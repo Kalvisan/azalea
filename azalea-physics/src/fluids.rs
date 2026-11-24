@@ -13,11 +13,11 @@ use azalea_entity::{
     dimensions::EntityDimensions,
     metadata::{Sprinting, Swimming},
 };
-use azalea_registry::builtin::BlockKind;
+use azalea_registry::{builtin::BlockKind, tags};
 use azalea_world::{World, WorldName, Worlds};
 use bevy_ecs::prelude::*;
 
-use crate::collision::{BlockWithShape, Shapes, VoxelShape, box_shape, legacy_blocks_motion};
+use crate::collision::{BlockWithShape, Shapes, VoxelShape, box_shape};
 
 /// Updates which fluids the entity touches, how deep it is in them, whether its
 /// eyes are in water, and pushes it with their currents, like vanilla's
@@ -211,21 +211,32 @@ fn fluid_height_for_camera(fluid: &FluidState, world: &World, pos: BlockPos) -> 
     if fluid.amount == 8 {
         let above_pos = pos.up(1);
         let above = world.get_block_state(above_pos).unwrap_or_default();
-        if has_sturdy_bottom_face(above, above_pos) {
+        if is_face_sturdy(above, above_pos, Direction::Down) {
             return 1.;
         }
     }
     fluid_height(fluid, world, pos)
 }
 
-/// `BlockState.isFaceSturdy(Direction.DOWN)`, from the collision shape: the
-/// block fills the whole bottom square of its cell. Vanilla reads the support
-/// shape, which differs from the collision shape for few blocks.
-fn has_sturdy_bottom_face(state: BlockState, pos: BlockPos) -> bool {
-    static BOTTOM_FACE: LazyLock<VoxelShape> =
-        LazyLock::new(|| box_shape(0., 0., 0., 1., 1. / 16., 1.));
+/// `BlockState.isFaceSturdy` with the full support type, from the collision
+/// shape: the block fills the whole square of its cell on the `direction`
+/// side. Vanilla reads the support shape, which differs from the collision
+/// shape for few blocks.
+fn is_face_sturdy(state: BlockState, pos: BlockPos, direction: Direction) -> bool {
+    static FACES: LazyLock<[VoxelShape; 6]> = LazyLock::new(|| {
+        const T: f64 = 1. / 16.;
+        [
+            box_shape(0., 0., 0., 1., T, 1.),
+            box_shape(0., 1. - T, 0., 1., 1., 1.),
+            box_shape(0., 0., 0., 1., 1., T),
+            box_shape(0., 0., 1. - T, 1., 1., 1.),
+            box_shape(0., 0., 0., T, 1., 1.),
+            box_shape(1. - T, 0., 0., 1., 1., 1.),
+        ]
+    });
+    let face = &FACES[direction as usize];
     let shape = state.collision_shape(pos);
-    !Shapes::matches_anywhere(&BOTTOM_FACE, &shape, |face, block| face && !block)
+    !Shapes::matches_anywhere(face, &shape, |face, block| face && !block)
 }
 
 /// `Player.updateSwimming`: sprinting under water starts swimming, which
@@ -289,7 +300,7 @@ pub fn get_fluid_flow(fluid: &FluidState, world: &World, pos: BlockPos) -> Vec3 
         let mut adjacent_height_difference: f32 = 0.;
 
         if adjacent_fluid_height == 0. {
-            if !legacy_blocks_motion(adjacent_block_state) {
+            if !tags::blocks::BLOCKS_FLUID_FLOW.contains(&BlockKind::from(adjacent_block_state)) {
                 let block_pos_below_adjacent = adjacent_block_pos.down(1);
                 let fluid_below_adjacent = world
                     .get_fluid_state(block_pos_below_adjacent)
@@ -329,7 +340,8 @@ pub fn get_fluid_flow(fluid: &FluidState, world: &World, pos: BlockPos) -> Vec3 
     flow.normalize()
 }
 
-// i don't really get what this is for
+/// `FlowingFluid.isSolidFace`: whether the block beside falling fluid turns
+/// its flow downwards.
 fn is_solid_face(
     fluid: &FluidState,
     world: &World,
@@ -344,29 +356,11 @@ fn is_solid_face(
     if direction == Direction::Up {
         return true;
     }
-    let registry_block = BlockKind::from(block_state);
     if matches!(
-        registry_block,
-        // frosted ice is from frost walker
+        BlockKind::from(block_state),
         BlockKind::Ice | BlockKind::FrostedIce
     ) {
         return false;
     }
-    is_face_sturdy(block_state, world, adjacent_pos, direction)
-}
-
-fn is_face_sturdy(
-    _block_state: BlockState,
-    _world: &World,
-    _pos: BlockPos,
-    _direction: Direction,
-) -> bool {
-    // TODO: this does a whole bunch of physics shape checks for waterlogged
-    // blocks that i honestly cannot be bothered to implement right now
-
-    // see BlockBehavior.isFaceSturdy in the decompiled minecraft source
-
-    // also, this probably should be in a module other than fluids.rs
-
-    false
+    is_face_sturdy(block_state, adjacent_pos, direction)
 }
