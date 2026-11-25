@@ -106,6 +106,12 @@ pub fn ai_step(
             physics.no_jump_delay -= 1;
         }
 
+        // LocalPlayer.aiStep sinks a crouching player in water before
+        // LivingEntity.aiStep zeroes tiny velocities and adds the jump
+        if client_movement.trying_to_crouch && physics.is_in_water() {
+            go_down_in_water(&mut physics);
+        }
+
         if is_player {
             if physics.velocity.horizontal_distance_squared() < 9.0e-6 {
                 physics.velocity.x = 0.;
@@ -129,10 +135,6 @@ pub fn ai_step(
         } else {
             physics.x_acceleration *= 0.98;
             physics.z_acceleration *= 0.98;
-        }
-
-        if client_movement.trying_to_crouch && physics.is_in_water() {
-            go_down_in_water(&mut physics);
         }
 
         if jumping == Some(&Jumping(true)) {

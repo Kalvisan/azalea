@@ -6,6 +6,7 @@ use azalea_core::{
 use azalea_entity::{
     Attributes, HasClientLoaded, Jumping, LoadedBelow, LocalEntity, LookDirection, OnClimbable,
     Physics, PlayerAbilities, Position,
+    dimensions::EntityDimensions,
     metadata::{FallFlying, Sprinting, Swimming},
     move_relative, view_vector,
 };
@@ -33,6 +34,7 @@ pub fn travel(
             Entity,
             &Attributes,
             &WorldName,
+            &EntityDimensions,
             &OnClimbable,
             &Jumping,
             Option<&ClientMovementState>,
@@ -55,6 +57,7 @@ pub fn travel(
         entity,
         attributes,
         world_name,
+        dimensions,
         on_climbable,
         jumping,
         physics_state,
@@ -96,6 +99,8 @@ pub fn travel(
             sprinting,
             on_climbable: *on_climbable,
             jumping: *jumping,
+            eye_height: dimensions.eye_height as f64,
+            lava_push_factor: crate::fluids::lava_push_factor(&world, world_name),
         };
 
         if ctx.physics.is_in_water() || ctx.physics.is_in_lava() {

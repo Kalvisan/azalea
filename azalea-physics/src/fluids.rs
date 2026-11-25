@@ -40,52 +40,62 @@ pub fn update_in_water_state_and_do_fluid_pushing(
         // from the previous update
         physics.was_eye_in_water = physics.eye_in_water;
 
-        let eye = Vec3::new(
-            position.x,
-            position.y + dimensions.eye_height as f64,
-            position.z,
-        );
-        let interaction = FluidInteraction::update(&physics, &world, eye);
+        let eye_height = dimensions.eye_height as f64;
+        let push = lava_push_factor(&world, world_name);
+        update_fluid_interaction(&mut physics, **position, eye_height, &world, push);
+    }
+}
 
-        physics.water_fluid_height = interaction.water.height;
-        physics.lava_fluid_height = interaction.lava.height;
-        physics.eye_in_water = interaction.eye_in_water;
+/// The lava current's scale in the entity's dimension: stronger where it is ultrawarm.
+pub(crate) fn lava_push_factor(world: &World, world_name: &WorldName) -> f64 {
+    // right now doing registries.dimension_type() clones the entire registry,
+    // which is very inefficient, so for now we're doing this instead
+    let is_ultrawarm = world
+        .registries
+        .dimension_type
+        .map
+        .get(&**world_name)
+        .and_then(|i| i.ultrawarm)
+        .unwrap_or_default();
+    if is_ultrawarm {
+        0.007
+    } else {
+        0.0023333333333333335
+    }
+}
 
-        // TODO: implement vehicles and boats
-        let in_water = interaction.water.height > 0.;
-        if in_water {
-            // if !was_touching_water && !first_tick {
-            //     do_water_splash_effect();
-            // }
+/// One `Entity.updateFluidInteraction` for an entity at `position` with its eyes
+/// `eye_height` above its feet: which fluids it touches and how deep, whether
+/// its eyes are in water, and the currents' push. Runs at tick start and again
+/// after the move on a tick that started out of water
+/// (`LivingEntity.checkFallDamage`).
+pub(crate) fn update_fluid_interaction(
+    physics: &mut Physics,
+    position: Vec3,
+    eye_height: f64,
+    world: &World,
+    lava_push_factor: f64,
+) {
+    let eye = Vec3::new(position.x, position.y + eye_height, position.z);
+    let interaction = FluidInteraction::update(physics, world, eye);
 
-            physics.reset_fall_distance();
-            physics.clear_fire();
-        }
-        physics.was_touching_water = in_water;
+    physics.water_fluid_height = interaction.water.height;
+    physics.lava_fluid_height = interaction.lava.height;
+    physics.eye_in_water = interaction.eye_in_water;
 
-        // right now doing registries.dimension_type() clones the entire
-        // registry which is very inefficient, so for now we're doing
-        // this instead
+    // TODO: implement vehicles and boats
+    let in_water = interaction.water.height > 0.;
+    if in_water {
+        physics.reset_fall_distance();
+        physics.clear_fire();
+    }
+    physics.was_touching_water = in_water;
 
-        let is_ultrawarm = world
-            .registries
-            .dimension_type
-            .map
-            .get(&**world_name)
-            .and_then(|i| i.ultrawarm)
-            .unwrap_or_default();
-        let lava_push_factor = if is_ultrawarm {
-            0.007
-        } else {
-            0.0023333333333333335
-        };
-
-        if in_water {
-            interaction.water.apply_to(&mut physics, 0.014);
-        }
-        if interaction.lava.height > 0. {
-            interaction.lava.apply_to(&mut physics, lava_push_factor);
-        }
+    if in_water {
+        interaction.water.apply_to(physics, 0.014);
+    }
+    if interaction.lava.height > 0. {
+        interaction.lava.apply_to(physics, lava_push_factor);
     }
 }
 

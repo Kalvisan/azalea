@@ -116,6 +116,10 @@ pub struct MoveCtx<'world, 'state, 'a, 'b> {
     pub sprinting: Sprinting,
     pub on_climbable: OnClimbable,
     pub jumping: Jumping,
+    /// How far above its feet the entity's eyes are, for the fluid update after the move.
+    pub eye_height: f64,
+    /// The lava current's scale in the entity's dimension, for the fluid update after the move.
+    pub lava_push_factor: f64,
 }
 
 /// Move an entity by a given delta, checking for collisions.
@@ -185,6 +189,7 @@ pub fn move_colliding(ctx: &mut MoveCtx, mut movement: Vec3) {
 
     check_fall_damage(
         physics,
+        (world, ***position, ctx.eye_height, ctx.lava_push_factor),
         collide_result.y,
         block_state_below,
         block_pos_below,
@@ -237,12 +242,19 @@ pub fn move_colliding(ctx: &mut MoveCtx, mut movement: Vec3) {
     // getFireImmuneTicks()); }
 }
 
+/// `LivingEntity.checkFallDamage`: an entity that started the tick out of water updates its fluids again after the
+/// move, so the step into water already gets the current's push and its fall distance reset; then the fall distance
+/// grows or resets.
 fn check_fall_damage(
     physics: &mut Physics,
+    (world, position, eye_height, lava_push_factor): (&World, Vec3, f64, f64),
     delta_y: f64,
     _block_state_below: BlockState,
     _block_pos_below: BlockPos,
 ) {
+    if !physics.is_in_water() {
+        crate::fluids::update_fluid_interaction(physics, position, eye_height, world, lava_push_factor);
+    }
     if !physics.is_in_water() && delta_y < 0. {
         physics.fall_distance -= delta_y as f32 as f64;
     }
