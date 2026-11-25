@@ -82,7 +82,7 @@ impl FluidPickType {
     pub fn can_pick(&self, fluid_state: &FluidState) -> bool {
         match self {
             Self::None => false,
-            Self::SourceOnly => fluid_state.amount == 8,
+            Self::SourceOnly => fluid_state.amount == 8 && !fluid_state.falling,
             Self::Any => fluid_state.kind != FluidKind::Empty,
             Self::Water => fluid_state.kind == FluidKind::Water,
         }

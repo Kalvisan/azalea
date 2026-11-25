@@ -163,6 +163,7 @@ pub fn move_colliding(ctx: &mut MoveCtx, mut movement: Vec3) {
 
         if new_pos != ***position {
             ***position = new_pos;
+            physics.bounding_box = physics.bounding_box.move_relative(collide_result);
         }
     }
 
