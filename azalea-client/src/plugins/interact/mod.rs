@@ -386,13 +386,13 @@ pub struct EntityInteractEvent {
     #[event_target]
     pub client: Entity,
     pub target: Entity,
-    /// The position on the entity that we'll tell the server that we clicked
-    /// on.
+    /// The world position on the entity that we clicked on; the server is told
+    /// it relative to the entity's position, as vanilla does.
     ///
     /// This doesn't matter for most entities. If it's set to `None` but we're
     /// looking at the target, it'll use the correct value. If it's `None` and
-    /// we're not looking at the entity, then it'll arbitrary send the target's
-    /// exact position.
+    /// we're not looking at the entity, then it'll send the entity's own
+    /// position (zero relative to it).
     pub location: Option<Vec3>,
 }
 
@@ -417,24 +417,28 @@ pub fn handle_entity_interact(
         return;
     };
 
-    let location = if let Some(l) = trigger.location {
-        l
-    } else {
-        // if we're looking at the entity, use that
-        if let Some(entity_hit_result) = hit_result.as_entity_hit_result()
-            && entity_hit_result.entity == trigger.target
-        {
-            entity_hit_result.location
-        } else {
-            // if we're not looking at the entity, make up a value that's good
-            // enough by using the entity's position
-            let Ok(target_position) = target_query.get(trigger.target) else {
-                warn!("tried to look at an entity without the entity having a position");
-                return;
-            };
-            **target_position
-        }
+    let Ok(target_position) = target_query.get(trigger.target) else {
+        warn!("tried to interact with an entity without the entity having a position");
+        return;
     };
+    let target_position = **target_position;
+
+    // the world position the click hits: the given one, the crosshair's hit on
+    // the entity, or else the entity's own position
+    let hit = if let Some(l) = trigger.location {
+        l
+    } else if let Some(entity_hit_result) = hit_result.as_entity_hit_result()
+        && entity_hit_result.entity == trigger.target
+    {
+        entity_hit_result.location
+    } else {
+        target_position
+    };
+    // vanilla sends the hit relative to the entity's position
+    // (MultiPlayerGameMode.interactAt: hitResult.getLocation().subtract(entity
+    // position)); an absolute world position is far outside the hitbox, which
+    // anticheats flag (Grim's InvalidInteractCursor)
+    let location = hit - target_position;
 
     let interact = ServerboundInteract {
         entity_id,
